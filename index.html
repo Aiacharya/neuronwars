@@ -6,65 +6,42 @@
 <title>Neuron Wars</title>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
-  body {
-    background:#0a0a12; overflow:hidden;
-    width:100vw; height:100vh;
-    font-family:'Courier New',monospace;
-    touch-action:none; user-select:none; -webkit-user-select:none;
-  }
+  body { background:#0a0a12; overflow:hidden; width:100vw; height:100vh;
+    font-family:'Courier New',monospace; touch-action:none;
+    user-select:none; -webkit-user-select:none; }
   #game-canvas { display:block; }
-
-  /* ── HUD ── */
-  #hud {
-    position:fixed; top:0; left:0; right:0; height:44px;
-    background:rgba(8,8,18,0.93);
-    border-bottom:1px solid #1a1a2e;
-    pointer-events:none; z-index:10;
-    display:flex; flex-direction:column;
-    justify-content:center; padding:0 14px; gap:3px;
-  }
-  #hud-labels {
-    display:flex; justify-content:space-between; align-items:center;
-  }
+  #hud { position:fixed; top:0; left:0; right:0; height:44px;
+    background:rgba(8,8,18,0.93); border-bottom:1px solid #1a1a2e;
+    pointer-events:none; z-index:10; display:flex; flex-direction:column;
+    justify-content:center; padding:0 14px; gap:3px; }
+  #hud-labels { display:flex; justify-content:space-between; align-items:center; }
   #hud-player { color:#2299ff; font-size:11px; font-weight:bold; letter-spacing:.5px; }
   #hud-timer  { color:#eee;    font-size:13px; font-weight:bold; letter-spacing:1px; }
   #hud-ai     { color:#ff5522; font-size:11px; font-weight:bold; letter-spacing:.5px; }
-  #hud-bar-wrap {
-    height:5px; border-radius:3px; overflow:hidden;
-    background:#1a1a2a; display:flex;
-  }
-  #bar-player { background:#2299ff; height:100%; transition:width .4s; }
-  #bar-ai     { background:#ff5522; height:100%; transition:width .4s; }
-  #bar-neutral{ background:#3a3a5c; height:100%; transition:width .4s; }
-
-  #fps-counter {
-    position:fixed; bottom:6px; right:10px;
-    color:#2a2a3a; font-size:10px; font-family:monospace;
-    pointer-events:none; z-index:20;
-  }
-  #version-tag {
-    position:fixed; bottom:6px; left:10px;
-    color:#2a2a3a; font-size:10px; font-family:monospace;
-    pointer-events:none; z-index:20;
-  }
-  #map-label {
-    position:fixed; top:50px; left:50%; transform:translateX(-50%);
+  #hud-bar-wrap { height:5px; border-radius:3px; overflow:hidden; background:#1a1a2a; display:flex; }
+  #bar-player  { background:#2299ff; height:100%; transition:width .4s; }
+  #bar-ai      { background:#ff5522; height:100%; transition:width .4s; }
+  #bar-neutral { background:#3a3a5c; height:100%; transition:width .4s; }
+  #fps-counter { position:fixed; bottom:6px; right:10px; color:#2a2a3a;
+    font-size:10px; font-family:monospace; pointer-events:none; z-index:20; }
+  #version-tag { position:fixed; bottom:6px; left:10px; color:#2a2a3a;
+    font-size:10px; font-family:monospace; pointer-events:none; z-index:20; }
+  #map-label { position:fixed; top:50px; left:50%; transform:translateX(-50%);
     color:rgba(180,180,220,0.35); font-size:9px; letter-spacing:2px;
-    text-transform:uppercase; pointer-events:none; z-index:10;
-  }
+    text-transform:uppercase; pointer-events:none; z-index:10; }
 </style>
 </head>
 <body>
 <div id="hud">
   <div id="hud-labels">
-    <span id="hud-player">YOU ▸ 0</span>
+    <span id="hud-player">YOU &#9656; 0</span>
     <span id="hud-timer">60</span>
-    <span id="hud-ai">AI ◂ 0</span>
+    <span id="hud-ai">AI &#9666; 0</span>
   </div>
   <div id="hud-bar-wrap">
-    <div id="bar-player" style="width:25%"></div>
-    <div id="bar-ai"     style="width:25%"></div>
-    <div id="bar-neutral"style="width:50%"></div>
+    <div id="bar-player"  style="width:25%"></div>
+    <div id="bar-ai"      style="width:25%"></div>
+    <div id="bar-neutral" style="width:50%"></div>
   </div>
 </div>
 <canvas id="game-canvas"></canvas>
@@ -74,865 +51,488 @@
 <div id="fps-counter">-- fps</div>
 <div id="version-tag">v0.3</div>
 <div id="map-label"></div>
-
 <script>
 'use strict';
-// ╔══════════════════════════════════════════════════════════════════════════════╗
-// ║  NEURON WARS  ·  v0.3 — State.io-quality polish                            ║
-// ╚══════════════════════════════════════════════════════════════════════════════╝
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// § 1  TUNING CONSTANTS  (all magic numbers live here, nowhere else)
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-const CFG = {
-  // Physics
-  WAVE_SPEED:       145,   // px/s base travel speed
-  SEND_FRAC:        0.50,  // fraction of troops sent per wave
-  EASE_IN_DIST:     0.12,  // fraction of path for ease-in
-  EASE_OUT_DIST:    0.14,  // fraction of path for ease-out
-  EASE_POWER:       2.2,   // exponent for easing curve
-
-  // Stream particles
-  PARTICLE_SIZE:    4.5,   // diamond half-size px
-  PARTICLE_GAP:     0.040, // spacing between dots as fraction of wave duration
-  MAX_DOTS:         38,    // cap dots per wave for perf
-  LATERAL_JITTER:   3.2,   // ±px sideways scatter per particle
-  JITTER_FREQ:      4.8,   // how tightly the scatter oscillates along path
-
-  // Ghost trail
-  TRAIL_LEN:        5,     // segments behind each particle
-  TRAIL_ALPHA_MAX:  0.38,  // head alpha of trail
-  TRAIL_FADE:       0.55,  // per-segment alpha multiplier
-
-  // Bezier curve
-  CURVE_BEND:       0.22,  // arc height as fraction of distance
-
-  // Waves / clusters
-  WAVE_CLUSTER_SIZE:5,     // emit this many particles per micro-burst
-  WAVE_CLUSTER_GAP: 0.022, // extra gap between clusters (fraction)
-
-  // Node pulse anim  (spring)
-  SPRING_K:         0.28,
-  SPRING_DAMP:      0.58,
-  PULSE_SEND:       0.82,  // scale on send
-  PULSE_RECV:       1.18,  // scale on receive
-  PULSE_HIT:        1.12,  // scale on enemy hit
-
-  // Impact particles
-  IMPACT_COUNT:     8,     // splat dots on arrival
-  IMPACT_LIFE:      0.38,  // seconds
-  IMPACT_SPEED:     52,    // px/s outward
-  IMPACT_SIZE:      3.2,
-
-  // Color wash (capture feedback)
-  WASH_DECAY:       2.8,   // how fast the wash fades per second
-
-  // AI
-  AI_INTERVAL:      1.4,
-  AI_MIN_TROOPS:    5,
-
-  // Game
-  GAME_DURATION:    60,
-  HIT_MUL:          1.6,   // tap radius multiplier
-
-  // Reduced motion (set true to disable decorative FX)
-  REDUCED_MOTION: window.matchMedia('(prefers-reduced-motion:reduce)').matches,
+const CFG={
+  WAVE_SPEED:145,SEND_FRAC:.50,EASE_IN_DIST:.12,EASE_OUT_DIST:.14,EASE_POWER:2.2,
+  PARTICLE_SIZE:4.5,PARTICLE_GAP:.040,MAX_DOTS:38,LATERAL_JITTER:3.2,JITTER_FREQ:4.8,
+  TRAIL_LEN:5,TRAIL_ALPHA_MAX:.38,TRAIL_FADE:.55,CURVE_BEND:.22,
+  WAVE_CLUSTER_SIZE:5,WAVE_CLUSTER_GAP:.022,
+  SPRING_K:.28,SPRING_DAMP:.58,PULSE_SEND:.82,PULSE_RECV:1.18,PULSE_HIT:1.12,
+  IMPACT_COUNT:8,IMPACT_LIFE:.38,IMPACT_SPEED:52,IMPACT_SIZE:3.2,WASH_DECAY:2.8,
+  AI_INTERVAL:1.4,AI_MIN_TROOPS:5,GAME_DURATION:60,HIT_MUL:1.6,
+  REDUCED_MOTION:window.matchMedia('(prefers-reduced-motion:reduce)').matches
 };
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// § 2  COLOUR PALETTE
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-const OWNER = { NONE:0, PLAYER:1, AI:2 };
-const PAL = {
-  bg:          '#0a0a12',
-  edge:        'rgba(30,30,55,0.55)',
-  edgeDrag:    'rgba(100,160,255,0.35)',
-  neutral:     '#4a4a6c',
-  neutralLo:   '#22223a',
-  player:      '#2299ff',
-  playerLo:    '#0a2d5a',
-  playerRgb:   '34,153,255',
-  ai:          '#ff5522',
-  aiLo:        '#5a1800',
-  aiRgb:       '255,85,34',
-  power:       '#cc44ff',
-  powerLo:     '#330966',
-  text:        '#ffffff',
-  timerWarn:   '#ff4433',
-  overlayBg:   'rgba(4,4,12,0.90)',
-  winText:     '#44ffaa',
-  loseText:    '#ff4433',
-  drawText:    '#cccc44',
+const OWNER={NONE:0,PLAYER:1,AI:2};
+const PAL={
+  edge:'rgba(30,30,55,0.55)',edgeDrag:'rgba(100,160,255,0.35)',
+  neutral:'#4a4a6c',neutralLo:'#22223a',
+  player:'#2299ff',playerLo:'#0a2d5a',playerRgb:'34,153,255',
+  ai:'#ff5522',aiLo:'#5a1800',aiRgb:'255,85,34',
+  power:'#cc44ff',powerLo:'#330966',
+  text:'#ffffff',timerWarn:'#ff4433',overlayBg:'rgba(4,4,12,0.90)',
+  winText:'#44ffaa',loseText:'#ff4433',drawText:'#cccc44'
 };
-
-function ownerColor(owner, lo=false) {
-  if (owner===OWNER.PLAYER) return lo ? PAL.playerLo : PAL.player;
-  if (owner===OWNER.AI)     return lo ? PAL.aiLo     : PAL.ai;
-  return lo ? PAL.neutralLo : PAL.neutral;
+function ownerColor(o,lo){
+  if(o===OWNER.PLAYER)return lo?PAL.playerLo:PAL.player;
+  if(o===OWNER.AI)    return lo?PAL.aiLo:PAL.ai;
+  return lo?PAL.neutralLo:PAL.neutral;
 }
-function ownerRgb(owner) {
-  if (owner===OWNER.PLAYER) return PAL.playerRgb;
-  if (owner===OWNER.AI)     return PAL.aiRgb;
+function ownerRgb(o){
+  if(o===OWNER.PLAYER)return PAL.playerRgb;
+  if(o===OWNER.AI)    return PAL.aiRgb;
   return '120,120,180';
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// § 3  MAP DEFINITIONS  (data-driven, zero rendering code)
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Each map: { name, nodes:[{id,fx,fy,owner,troops,cap,prod,type}], edges:[[a,b],...] }
-// fx/fy are 0-1 fractions of usable canvas area (top-bar and bottom gutter excluded)
-
-const MAPS = [
-// ── 0: Classic (original layout) ─────────────────────────────────────────────
-{
-  name: 'Classic',
-  nodes: [
-    {id:0,fx:.28,fy:.80,owner:OWNER.PLAYER,troops:15,cap:20,prod:1.2,type:'normal'},
-    {id:1,fx:.72,fy:.80,owner:OWNER.PLAYER,troops:15,cap:20,prod:1.2,type:'normal'},
-    {id:2,fx:.28,fy:.20,owner:OWNER.AI,    troops:15,cap:20,prod:1.2,type:'normal'},
-    {id:3,fx:.72,fy:.20,owner:OWNER.AI,    troops:15,cap:20,prod:1.2,type:'normal'},
-    {id:4,fx:.30,fy:.50,owner:OWNER.NONE,  troops:8, cap:25,prod:1.8,type:'power'},
-    {id:5,fx:.70,fy:.50,owner:OWNER.NONE,  troops:8, cap:25,prod:1.8,type:'power'},
-    {id:6,fx:.50,fy:.33,owner:OWNER.NONE,  troops:5, cap:15,prod:0.8,type:'neutral'},
-    {id:7,fx:.50,fy:.67,owner:OWNER.NONE,  troops:5, cap:15,prod:0.8,type:'neutral'},
-  ],
-  edges:[[0,7],[1,7],[2,6],[3,6],[0,4],[1,5],[2,4],[3,5],[4,6],[5,6],[4,7],[5,7],[6,7]],
-},
-
-// ── 1: The Hourglass ─────────────────────────────────────────────────────────
-// Two wide zones connected by one central chokepoint
-{
-  name: 'Hourglass',
-  nodes: [
-    {id:0,fx:.18,fy:.82,owner:OWNER.PLAYER,troops:18,cap:22,prod:1.3,type:'normal'},
-    {id:1,fx:.50,fy:.88,owner:OWNER.PLAYER,troops:12,cap:18,prod:1.0,type:'normal'},
-    {id:2,fx:.82,fy:.82,owner:OWNER.PLAYER,troops:18,cap:22,prod:1.3,type:'normal'},
-    {id:3,fx:.18,fy:.18,owner:OWNER.AI,    troops:18,cap:22,prod:1.3,type:'normal'},
-    {id:4,fx:.50,fy:.12,owner:OWNER.AI,    troops:12,cap:18,prod:1.0,type:'normal'},
-    {id:5,fx:.82,fy:.18,owner:OWNER.AI,    troops:18,cap:22,prod:1.3,type:'normal'},
-    {id:6,fx:.50,fy:.50,owner:OWNER.NONE,  troops:10,cap:30,prod:2.2,type:'power'}, // chokepoint
-    {id:7,fx:.25,fy:.65,owner:OWNER.NONE,  troops:6, cap:14,prod:0.7,type:'neutral'},
-    {id:8,fx:.75,fy:.65,owner:OWNER.NONE,  troops:6, cap:14,prod:0.7,type:'neutral'},
-    {id:9,fx:.25,fy:.35,owner:OWNER.NONE,  troops:6, cap:14,prod:0.7,type:'neutral'},
-    {id:10,fx:.75,fy:.35,owner:OWNER.NONE, troops:6, cap:14,prod:0.7,type:'neutral'},
-  ],
-  edges:[[0,7],[1,7],[1,8],[2,8],[3,9],[4,9],[4,10],[5,10],
-         [7,6],[8,6],[9,6],[10,6],[0,1],[1,2],[3,4],[4,5]],
-},
-
-// ── 2: The Archipelago ───────────────────────────────────────────────────────
-// Small clusters connected by long lanes
-{
-  name: 'Archipelago',
-  nodes: [
-    {id:0,fx:.12,fy:.85,owner:OWNER.PLAYER,troops:20,cap:24,prod:1.4,type:'normal'},
-    {id:1,fx:.22,fy:.70,owner:OWNER.PLAYER,troops:10,cap:16,prod:0.9,type:'normal'},
-    {id:2,fx:.88,fy:.15,owner:OWNER.AI,    troops:20,cap:24,prod:1.4,type:'normal'},
-    {id:3,fx:.78,fy:.30,owner:OWNER.AI,    troops:10,cap:16,prod:0.9,type:'normal'},
-    {id:4,fx:.38,fy:.55,owner:OWNER.NONE,  troops:8, cap:20,prod:1.6,type:'power'},
-    {id:5,fx:.62,fy:.45,owner:OWNER.NONE,  troops:8, cap:20,prod:1.6,type:'power'},
-    {id:6,fx:.20,fy:.40,owner:OWNER.NONE,  troops:5, cap:12,prod:0.6,type:'neutral'},
-    {id:7,fx:.50,fy:.80,owner:OWNER.NONE,  troops:5, cap:12,prod:0.6,type:'neutral'},
-    {id:8,fx:.80,fy:.60,owner:OWNER.NONE,  troops:5, cap:12,prod:0.6,type:'neutral'},
-    {id:9,fx:.50,fy:.20,owner:OWNER.NONE,  troops:5, cap:12,prod:0.6,type:'neutral'},
-  ],
-  edges:[[0,1],[1,6],[6,4],[4,7],[7,5],[5,8],[8,3],[3,2],
-         [1,4],[4,5],[5,3],[6,9],[9,5],[2,9]],
-},
-
-// ── 3: Ring of Fire ──────────────────────────────────────────────────────────
-// Outer ring plus one high-value dangerous center
-{
-  name: 'Ring of Fire',
-  nodes: [
-    {id:0,fx:.50,fy:.12,owner:OWNER.PLAYER,troops:14,cap:20,prod:1.1,type:'normal'},
-    {id:1,fx:.83,fy:.30,owner:OWNER.PLAYER,troops:14,cap:20,prod:1.1,type:'normal'},
-    {id:2,fx:.83,fy:.70,owner:OWNER.NONE,  troops:7, cap:16,prod:0.8,type:'neutral'},
-    {id:3,fx:.50,fy:.88,owner:OWNER.NONE,  troops:7, cap:16,prod:0.8,type:'neutral'},
-    {id:4,fx:.17,fy:.70,owner:OWNER.AI,    troops:14,cap:20,prod:1.1,type:'normal'},
-    {id:5,fx:.17,fy:.30,owner:OWNER.AI,    troops:14,cap:20,prod:1.1,type:'normal'},
-    {id:6,fx:.50,fy:.50,owner:OWNER.NONE,  troops:18,cap:35,prod:2.8,type:'power'}, // center
-  ],
-  edges:[[0,1],[1,2],[2,3],[3,4],[4,5],[5,0],  // ring
-         [0,6],[1,6],[2,6],[3,6],[4,6],[5,6]], // spokes
-},
-
-// ── 4: The Web ───────────────────────────────────────────────────────────────
-// Dense interconnected graph — many attack vectors
-{
-  name: 'The Web',
-  nodes: [
-    {id:0,fx:.50,fy:.10,owner:OWNER.AI,    troops:16,cap:20,prod:1.2,type:'normal'},
-    {id:1,fx:.80,fy:.28,owner:OWNER.NONE,  troops:6, cap:14,prod:0.7,type:'neutral'},
-    {id:2,fx:.88,fy:.60,owner:OWNER.NONE,  troops:6, cap:14,prod:0.7,type:'neutral'},
-    {id:3,fx:.65,fy:.85,owner:OWNER.NONE,  troops:6, cap:14,prod:0.7,type:'neutral'},
-    {id:4,fx:.35,fy:.85,owner:OWNER.NONE,  troops:6, cap:14,prod:0.7,type:'neutral'},
-    {id:5,fx:.12,fy:.60,owner:OWNER.NONE,  troops:6, cap:14,prod:0.7,type:'neutral'},
-    {id:6,fx:.20,fy:.28,owner:OWNER.NONE,  troops:6, cap:14,prod:0.7,type:'neutral'},
-    {id:7,fx:.65,fy:.38,owner:OWNER.NONE,  troops:8, cap:18,prod:1.4,type:'power'},
-    {id:8,fx:.35,fy:.38,owner:OWNER.NONE,  troops:8, cap:18,prod:1.4,type:'power'},
-    {id:9,fx:.65,fy:.62,owner:OWNER.NONE,  troops:6, cap:14,prod:0.8,type:'neutral'},
-    {id:10,fx:.35,fy:.62,owner:OWNER.NONE, troops:6, cap:14,prod:0.8,type:'neutral'},
-    {id:11,fx:.50,fy:.90,owner:OWNER.PLAYER,troops:16,cap:20,prod:1.2,type:'normal'},
-  ],
-  edges:[[0,1],[1,2],[2,3],[3,4],[4,5],[5,6],[6,0],
-         [0,7],[1,7],[6,8],[5,10],[2,9],[3,9],[4,10],
-         [7,8],[7,9],[8,10],[9,11],[10,11],[8,7]],
-},
-
-// ── 5: The Fortress ──────────────────────────────────────────────────────────
-// Asymmetric: AI has one strong citadel, player has many weak nodes
-{
-  name: 'Fortress',
-  nodes: [
-    // Player cluster — many small nodes
-    {id:0,fx:.12,fy:.50,owner:OWNER.PLAYER,troops:12,cap:18,prod:1.0,type:'normal'},
-    {id:1,fx:.22,fy:.25,owner:OWNER.PLAYER,troops:10,cap:16,prod:0.9,type:'normal'},
-    {id:2,fx:.22,fy:.75,owner:OWNER.PLAYER,troops:10,cap:16,prod:0.9,type:'normal'},
-    {id:3,fx:.35,fy:.12,owner:OWNER.PLAYER,troops:8, cap:14,prod:0.8,type:'normal'},
-    {id:4,fx:.35,fy:.88,owner:OWNER.PLAYER,troops:8, cap:14,prod:0.8,type:'normal'},
-    // Neutral buffer zone
-    {id:5,fx:.50,fy:.35,owner:OWNER.NONE,  troops:8, cap:18,prod:1.2,type:'neutral'},
-    {id:6,fx:.50,fy:.65,owner:OWNER.NONE,  troops:8, cap:18,prod:1.2,type:'neutral'},
-    {id:7,fx:.62,fy:.50,owner:OWNER.NONE,  troops:10,cap:22,prod:1.5,type:'power'},
-    // AI Fortress
-    {id:8,fx:.85,fy:.50,owner:OWNER.AI,    troops:40,cap:60,prod:3.5,type:'power'}, // citadel
-    {id:9,fx:.75,fy:.28,owner:OWNER.AI,    troops:12,cap:18,prod:1.0,type:'normal'},
-    {id:10,fx:.75,fy:.72,owner:OWNER.AI,   troops:12,cap:18,prod:1.0,type:'normal'},
-  ],
-  edges:[[0,1],[0,2],[1,3],[2,4],[1,5],[2,6],[3,5],[4,6],
-         [5,7],[6,7],[7,9],[7,10],[9,8],[10,8],[9,10]],
-},
+const MAPS=[
+{name:'Classic',nodes:[
+  {id:0,fx:.28,fy:.80,owner:OWNER.PLAYER,troops:15,cap:20,prod:1.2,type:'normal'},
+  {id:1,fx:.72,fy:.80,owner:OWNER.PLAYER,troops:15,cap:20,prod:1.2,type:'normal'},
+  {id:2,fx:.28,fy:.20,owner:OWNER.AI,    troops:15,cap:20,prod:1.2,type:'normal'},
+  {id:3,fx:.72,fy:.20,owner:OWNER.AI,    troops:15,cap:20,prod:1.2,type:'normal'},
+  {id:4,fx:.30,fy:.50,owner:OWNER.NONE,  troops:8, cap:25,prod:1.8,type:'power'},
+  {id:5,fx:.70,fy:.50,owner:OWNER.NONE,  troops:8, cap:25,prod:1.8,type:'power'},
+  {id:6,fx:.50,fy:.33,owner:OWNER.NONE,  troops:5, cap:15,prod:0.8,type:'neutral'},
+  {id:7,fx:.50,fy:.67,owner:OWNER.NONE,  troops:5, cap:15,prod:0.8,type:'neutral'}
+],edges:[[0,7],[1,7],[2,6],[3,6],[0,4],[1,5],[2,4],[3,5],[4,6],[5,6],[4,7],[5,7],[6,7]]},
+{name:'Hourglass',nodes:[
+  {id:0,fx:.18,fy:.82,owner:OWNER.PLAYER,troops:18,cap:22,prod:1.3,type:'normal'},
+  {id:1,fx:.50,fy:.88,owner:OWNER.PLAYER,troops:12,cap:18,prod:1.0,type:'normal'},
+  {id:2,fx:.82,fy:.82,owner:OWNER.PLAYER,troops:18,cap:22,prod:1.3,type:'normal'},
+  {id:3,fx:.18,fy:.18,owner:OWNER.AI,    troops:18,cap:22,prod:1.3,type:'normal'},
+  {id:4,fx:.50,fy:.12,owner:OWNER.AI,    troops:12,cap:18,prod:1.0,type:'normal'},
+  {id:5,fx:.82,fy:.18,owner:OWNER.AI,    troops:18,cap:22,prod:1.3,type:'normal'},
+  {id:6,fx:.50,fy:.50,owner:OWNER.NONE,  troops:10,cap:30,prod:2.2,type:'power'},
+  {id:7,fx:.25,fy:.65,owner:OWNER.NONE,  troops:6, cap:14,prod:0.7,type:'neutral'},
+  {id:8,fx:.75,fy:.65,owner:OWNER.NONE,  troops:6, cap:14,prod:0.7,type:'neutral'},
+  {id:9,fx:.25,fy:.35,owner:OWNER.NONE,  troops:6, cap:14,prod:0.7,type:'neutral'},
+  {id:10,fx:.75,fy:.35,owner:OWNER.NONE, troops:6, cap:14,prod:0.7,type:'neutral'}
+],edges:[[0,7],[1,7],[1,8],[2,8],[3,9],[4,9],[4,10],[5,10],[7,6],[8,6],[9,6],[10,6],[0,1],[1,2],[3,4],[4,5]]},
+{name:'Archipelago',nodes:[
+  {id:0,fx:.12,fy:.85,owner:OWNER.PLAYER,troops:20,cap:24,prod:1.4,type:'normal'},
+  {id:1,fx:.22,fy:.70,owner:OWNER.PLAYER,troops:10,cap:16,prod:0.9,type:'normal'},
+  {id:2,fx:.88,fy:.15,owner:OWNER.AI,    troops:20,cap:24,prod:1.4,type:'normal'},
+  {id:3,fx:.78,fy:.30,owner:OWNER.AI,    troops:10,cap:16,prod:0.9,type:'normal'},
+  {id:4,fx:.38,fy:.55,owner:OWNER.NONE,  troops:8, cap:20,prod:1.6,type:'power'},
+  {id:5,fx:.62,fy:.45,owner:OWNER.NONE,  troops:8, cap:20,prod:1.6,type:'power'},
+  {id:6,fx:.20,fy:.40,owner:OWNER.NONE,  troops:5, cap:12,prod:0.6,type:'neutral'},
+  {id:7,fx:.50,fy:.80,owner:OWNER.NONE,  troops:5, cap:12,prod:0.6,type:'neutral'},
+  {id:8,fx:.80,fy:.60,owner:OWNER.NONE,  troops:5, cap:12,prod:0.6,type:'neutral'},
+  {id:9,fx:.50,fy:.20,owner:OWNER.NONE,  troops:5, cap:12,prod:0.6,type:'neutral'}
+],edges:[[0,1],[1,6],[6,4],[4,7],[7,5],[5,8],[8,3],[3,2],[1,4],[4,5],[5,3],[6,9],[9,5],[2,9]]},
+{name:'Ring of Fire',nodes:[
+  {id:0,fx:.50,fy:.12,owner:OWNER.PLAYER,troops:14,cap:20,prod:1.1,type:'normal'},
+  {id:1,fx:.83,fy:.30,owner:OWNER.PLAYER,troops:14,cap:20,prod:1.1,type:'normal'},
+  {id:2,fx:.83,fy:.70,owner:OWNER.NONE,  troops:7, cap:16,prod:0.8,type:'neutral'},
+  {id:3,fx:.50,fy:.88,owner:OWNER.NONE,  troops:7, cap:16,prod:0.8,type:'neutral'},
+  {id:4,fx:.17,fy:.70,owner:OWNER.AI,    troops:14,cap:20,prod:1.1,type:'normal'},
+  {id:5,fx:.17,fy:.30,owner:OWNER.AI,    troops:14,cap:20,prod:1.1,type:'normal'},
+  {id:6,fx:.50,fy:.50,owner:OWNER.NONE,  troops:18,cap:35,prod:2.8,type:'power'}
+],edges:[[0,1],[1,2],[2,3],[3,4],[4,5],[5,0],[0,6],[1,6],[2,6],[3,6],[4,6],[5,6]]},
+{name:'The Web',nodes:[
+  {id:0, fx:.50,fy:.10,owner:OWNER.AI,    troops:16,cap:20,prod:1.2,type:'normal'},
+  {id:1, fx:.80,fy:.28,owner:OWNER.NONE,  troops:6, cap:14,prod:0.7,type:'neutral'},
+  {id:2, fx:.88,fy:.60,owner:OWNER.NONE,  troops:6, cap:14,prod:0.7,type:'neutral'},
+  {id:3, fx:.65,fy:.85,owner:OWNER.NONE,  troops:6, cap:14,prod:0.7,type:'neutral'},
+  {id:4, fx:.35,fy:.85,owner:OWNER.NONE,  troops:6, cap:14,prod:0.7,type:'neutral'},
+  {id:5, fx:.12,fy:.60,owner:OWNER.NONE,  troops:6, cap:14,prod:0.7,type:'neutral'},
+  {id:6, fx:.20,fy:.28,owner:OWNER.NONE,  troops:6, cap:14,prod:0.7,type:'neutral'},
+  {id:7, fx:.65,fy:.38,owner:OWNER.NONE,  troops:8, cap:18,prod:1.4,type:'power'},
+  {id:8, fx:.35,fy:.38,owner:OWNER.NONE,  troops:8, cap:18,prod:1.4,type:'power'},
+  {id:9, fx:.65,fy:.62,owner:OWNER.NONE,  troops:6, cap:14,prod:0.8,type:'neutral'},
+  {id:10,fx:.35,fy:.62,owner:OWNER.NONE,  troops:6, cap:14,prod:0.8,type:'neutral'},
+  {id:11,fx:.50,fy:.90,owner:OWNER.PLAYER,troops:16,cap:20,prod:1.2,type:'normal'}
+],edges:[[0,1],[1,2],[2,3],[3,4],[4,5],[5,6],[6,0],[0,7],[1,7],[6,8],[5,10],[2,9],[3,9],[4,10],[7,8],[7,9],[8,10],[9,11],[10,11]]},
+{name:'Fortress',nodes:[
+  {id:0, fx:.12,fy:.50,owner:OWNER.PLAYER,troops:12,cap:18,prod:1.0,type:'normal'},
+  {id:1, fx:.22,fy:.25,owner:OWNER.PLAYER,troops:10,cap:16,prod:0.9,type:'normal'},
+  {id:2, fx:.22,fy:.75,owner:OWNER.PLAYER,troops:10,cap:16,prod:0.9,type:'normal'},
+  {id:3, fx:.35,fy:.12,owner:OWNER.PLAYER,troops:8, cap:14,prod:0.8,type:'normal'},
+  {id:4, fx:.35,fy:.88,owner:OWNER.PLAYER,troops:8, cap:14,prod:0.8,type:'normal'},
+  {id:5, fx:.50,fy:.35,owner:OWNER.NONE,  troops:8, cap:18,prod:1.2,type:'neutral'},
+  {id:6, fx:.50,fy:.65,owner:OWNER.NONE,  troops:8, cap:18,prod:1.2,type:'neutral'},
+  {id:7, fx:.62,fy:.50,owner:OWNER.NONE,  troops:10,cap:22,prod:1.5,type:'power'},
+  {id:8, fx:.85,fy:.50,owner:OWNER.AI,    troops:40,cap:60,prod:3.5,type:'power'},
+  {id:9, fx:.75,fy:.28,owner:OWNER.AI,    troops:12,cap:18,prod:1.0,type:'normal'},
+  {id:10,fx:.75,fy:.72,owner:OWNER.AI,    troops:12,cap:18,prod:1.0,type:'normal'}
+],edges:[[0,1],[0,2],[1,3],[2,4],[1,5],[2,6],[3,5],[4,6],[5,7],[6,7],[7,9],[7,10],[9,8],[10,8],[9,10]]}
 ];
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// § 4  CANVAS SETUP
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-const canvas = document.getElementById('game-canvas');
-const ctx    = canvas.getContext('2d');
-let W=0, H=0;
-
-function resize() {
-  W = canvas.width  = window.innerWidth;
-  H = canvas.height = window.innerHeight;
-  layoutNodes();
+const canvas=document.getElementById('game-canvas');
+const ctx=canvas.getContext('2d');
+let W=0,H=0;
+function resize(){W=canvas.width=window.innerWidth;H=canvas.height=window.innerHeight;layoutNodes();updateCredBtnPos();}
+window.addEventListener('resize',resize);
+let nodes=[],activeEdges=[],currentMap=0;
+function nodeRadius(n){return 18+(n.cap/30)*16;}
+function initNodes(mi){
+  const map=MAPS[mi];activeEdges=map.edges;
+  nodes=map.nodes.map(d=>({...d,x:0,y:0,spring:{scale:1,vel:0,target:1},wash:{alpha:0,rgb:'255,255,255'}}));
+  document.getElementById('map-label').textContent=map.name;
 }
-window.addEventListener('resize', resize);
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// § 5  NODE SYSTEM
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-let nodes=[], activeEdges=[], currentMap=0;
-
-function nodeRadius(n) { return 18 + (n.cap/30)*16; }
-
-function initNodes(mapIdx) {
-  const map = MAPS[mapIdx];
-  activeEdges = map.edges;
-  nodes = map.nodes.map(d => ({
-    ...d,
-    x:0, y:0,
-    // Spring animation
-    spring: { scale:1, vel:0, target:1 },
-    // Color-wash (capture feedback)  wash={alpha, rgb}
-    wash: { alpha:0, rgb:'255,255,255' },
-  }));
-  document.getElementById('map-label').textContent = map.name;
+function layoutNodes(){
+  const tp=48,bp=24,uh=H-tp-bp;
+  nodes.forEach(n=>{const d=MAPS[currentMap].nodes[n.id];n.x=d.fx*W;n.y=tp+d.fy*uh;});
 }
-
-function layoutNodes() {
-  const tp=48, bp=24, uh=H-tp-bp;
-  nodes.forEach(n => {
-    const d = MAPS[currentMap].nodes[n.id];
-    n.x = d.fx * W;
-    n.y = tp + d.fy * uh;
-  });
+function nodeAt(px,py){
+  let best=null,bd=Infinity;
+  nodes.forEach(n=>{const d=Math.hypot(n.x-px,n.y-py);if(d<bd){bd=d;best=n;}});
+  return(best&&bd<nodeRadius(best)*CFG.HIT_MUL)?best:null;
 }
-
-function nodeAt(px, py) {
-  let best=null, bd=Infinity;
-  nodes.forEach(n => {
-    const d = Math.hypot(n.x-px, n.y-py);
-    if (d < bd) { bd=d; best=n; }
-  });
-  return (best && bd < nodeRadius(best)*CFG.HIT_MUL) ? best : null;
+function bezierPt(sx,sy,cpx,cpy,ex,ey,t){const m=1-t;return{x:m*m*sx+2*m*t*cpx+t*t*ex,y:m*m*sy+2*m*t*cpy+t*t*ey};}
+function makeCP(sx,sy,ex,ey,seed){
+  const mx=(sx+ex)/2,my=(sy+ey)/2,dx=ex-sx,dy=ey-sy,dist=Math.hypot(dx,dy)||1;
+  const nx=-dy/dist,ny=dx/dist,dir=(seed%2===0)?1:-1,bend=dist*CFG.CURVE_BEND*dir;
+  return{cpx:mx+nx*bend,cpy:my+ny*bend};
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// § 6  PATH GENERATION  (Bezier arc + per-particle jitter)
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Returns point on quadratic bezier at t ∈ [0,1]
-function bezierPoint(sx, sy, cpx, cpy, ex, ey, t) {
-  const mt = 1-t;
-  return {
-    x: mt*mt*sx + 2*mt*t*cpx + t*t*ex,
-    y: mt*mt*sy + 2*mt*t*cpy + t*t*ey,
-  };
+function easedT(r){
+  const ei=CFG.EASE_IN_DIST,eo=CFG.EASE_OUT_DIST,ep=CFG.EASE_POWER;
+  if(r<ei)return Math.pow(r/ei,ep)*ei;
+  if(r>1-eo){const u=(r-(1-eo))/eo;return(1-eo)+(1-Math.pow(1-u,ep))*eo;}
+  return r;
 }
-
-// Compute the bezier control point for a wave (perpendicular arc)
-function makeControlPoint(sx, sy, ex, ey, seed) {
-  const mx=(sx+ex)/2, my=(sy+ey)/2;
-  const dx=ex-sx,   dy=ey-sy;
-  const dist=Math.hypot(dx,dy)||1;
-  // perpendicular normal
-  const nx=-dy/dist, ny=dx/dist;
-  // alternate bend direction based on wave id seed to avoid overlap
-  const dir = (seed%2===0)?1:-1;
-  const bend = dist * CFG.CURVE_BEND * dir;
-  return { cpx: mx+nx*bend, cpy: my+ny*bend };
+let waves=[],waveSeq=0;
+function launchWave(src,dst,owner){
+  if(src.id===dst.id||src.owner!==owner)return;
+  const sent=Math.floor(src.troops*CFG.SEND_FRAC);if(sent<1)return;
+  src.troops-=sent;
+  const dist=Math.hypot(dst.x-src.x,dst.y-src.y)||1,duration=dist/CFG.WAVE_SPEED;
+  const{cpx,cpy}=makeCP(src.x,src.y,dst.x,dst.y,waveSeq);
+  const totalDots=Math.min(sent,CFG.MAX_DOTS);
+  const jitterSeeds=Array.from({length:totalDots},()=>(Math.random()-.5)*2);
+  waves.push({id:waveSeq++,owner,srcId:src.id,dstId:dst.id,sent,t:0,duration,
+    sx:src.x,sy:src.y,ex:dst.x,ey:dst.y,cpx,cpy,totalDots,jitterSeeds});
+  nodePulse(src,CFG.PULSE_SEND);
 }
-
-// Eased t along the path: ease-in at start, ease-out at end
-function easedT(raw) {
-  const ei = CFG.EASE_IN_DIST, eo = CFG.EASE_OUT_DIST, ep = CFG.EASE_POWER;
-  if (raw < ei) {
-    return Math.pow(raw/ei, ep) * ei;
-  } else if (raw > 1-eo) {
-    const u = (raw-(1-eo))/eo;
-    return (1-eo) + (1-Math.pow(1-u, ep)) * eo;
-  }
-  return raw;
-}
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// § 7  WAVE / TROOP SYSTEM
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-let waves=[], waveSeq=0;
-
-function launchWave(src, dst, owner) {
-  if (src.id===dst.id || src.owner!==owner) return;
-  const sent = Math.floor(src.troops * CFG.SEND_FRAC);
-  if (sent < 1) return;
-  src.troops -= sent;
-
-  const dist = Math.hypot(dst.x-src.x, dst.y-src.y) || 1;
-  const duration = dist / CFG.WAVE_SPEED;
-  const { cpx, cpy } = makeControlPoint(src.x, src.y, dst.x, dst.y, waveSeq);
-  const totalDots = Math.min(sent, CFG.MAX_DOTS);
-
-  // Per-particle lateral jitter seeds (fixed so they're stable across frames)
-  const jitterSeeds = [];
-  for (let i=0; i<totalDots; i++) {
-    jitterSeeds.push((Math.random()-0.5)*2); // -1..1
-  }
-
-  waves.push({
-    id:waveSeq++, owner, srcId:src.id, dstId:dst.id, sent,
-    t:0, duration,
-    sx:src.x, sy:src.y, ex:dst.x, ey:dst.y,
-    cpx, cpy,
-    totalDots, jitterSeeds,
-  });
-
-  // Send pulse
-  nodePulse(src, CFG.PULSE_SEND, false);
-}
-
-// § 7a  Wave update
-function updateWaves(dt) {
+function updateWaves(dt){
   const done=[];
-  waves.forEach(w => {
-    w.t += dt / w.duration;
-    if (w.t >= 1) done.push(w);
-  });
-  done.forEach(w => {
-    waves = waves.filter(x=>x!==w);
-    resolveArrival(w);
-  });
+  waves.forEach(w=>{w.t+=dt/w.duration;if(w.t>=1)done.push(w);});
+  done.forEach(w=>{waves=waves.filter(x=>x!==w);resolveArrival(w);});
 }
-
-// § 7b  Arrival resolution
-function resolveArrival(w) {
-  const dst = nodes[w.dstId];
-
-  if (dst.owner === w.owner) {
-    // Reinforce
-    dst.troops = Math.min(dst.cap, dst.troops + w.sent);
-    nodePulse(dst, CFG.PULSE_RECV, false);
-  } else if (w.sent > dst.troops) {
-    // Capture
-    const prevOwner = dst.owner;
-    dst.owner  = w.owner;
-    dst.troops = w.sent - dst.troops;
-    // Color wash: flash with attacker colour
-    dst.wash.alpha = 0.70;
-    dst.wash.rgb   = ownerRgb(w.owner);
-    nodePulse(dst, CFG.PULSE_RECV, false);
-    spawnImpact(dst.x, dst.y, w.owner, CFG.IMPACT_COUNT * 1.5);
-    checkWin();
-  } else {
-    // Repelled
-    dst.troops -= w.sent;
-    if (dst.troops <= 0 && dst.owner !== OWNER.NONE) {
-      dst.owner = OWNER.NONE; dst.troops = 0;
-    }
-    spawnImpact(dst.x, dst.y, w.owner, CFG.IMPACT_COUNT);
-    nodePulse(dst, CFG.PULSE_HIT, false);
+function resolveArrival(w){
+  const dst=nodes[w.dstId];
+  if(dst.owner===w.owner){
+    dst.troops=Math.min(dst.cap,dst.troops+w.sent);nodePulse(dst,CFG.PULSE_RECV);
+  }else if(w.sent>dst.troops){
+    dst.owner=w.owner;dst.troops=w.sent-dst.troops;
+    dst.wash.alpha=0.70;dst.wash.rgb=ownerRgb(w.owner);
+    nodePulse(dst,CFG.PULSE_RECV);spawnImpact(dst.x,dst.y,w.owner,CFG.IMPACT_COUNT*1.5);checkWin();
+  }else{
+    dst.troops-=w.sent;
+    if(dst.troops<=0&&dst.owner!==OWNER.NONE){dst.owner=OWNER.NONE;dst.troops=0;}
+    spawnImpact(dst.x,dst.y,w.owner,CFG.IMPACT_COUNT);nodePulse(dst,CFG.PULSE_HIT);
   }
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// § 8  PARTICLE / TRAIL / IMPACT SYSTEM
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 let impacts=[];
-
-function spawnImpact(x, y, owner, count) {
-  if (CFG.REDUCED_MOTION) return;
-  const n = Math.ceil(count);
-  for (let i=0; i<n; i++) {
-    const ang = (Math.PI*2*i/n) + (Math.random()-.5)*.8;
-    const spd = CFG.IMPACT_SPEED * (.7+Math.random()*.6);
-    impacts.push({ x, y, vx:Math.cos(ang)*spd, vy:Math.sin(ang)*spd,
-                   life:CFG.IMPACT_LIFE, maxLife:CFG.IMPACT_LIFE,
-                   rgb:ownerRgb(owner) });
+function spawnImpact(x,y,owner,count){
+  if(CFG.REDUCED_MOTION)return;
+  const n=Math.ceil(count);
+  for(let i=0;i<n;i++){
+    const ang=(Math.PI*2*i/n)+(Math.random()-.5)*.8,spd=CFG.IMPACT_SPEED*(.7+Math.random()*.6);
+    impacts.push({x,y,vx:Math.cos(ang)*spd,vy:Math.sin(ang)*spd,life:CFG.IMPACT_LIFE,maxLife:CFG.IMPACT_LIFE,rgb:ownerRgb(owner)});
   }
 }
-
-function updateImpacts(dt) {
-  impacts = impacts.filter(p => {
-    p.life -= dt; p.x += p.vx*dt; p.y += p.vy*dt;
-    p.vx *= 0.88; p.vy *= 0.88;
-    return p.life > 0;
+function updateImpacts(dt){
+  impacts=impacts.filter(p=>{p.life-=dt;p.x+=p.vx*dt;p.y+=p.vy*dt;p.vx*=.88;p.vy*=.88;return p.life>0;});
+}
+function nodePulse(n,target){n.spring.target=target;}
+function updateNodeAnims(dt){
+  nodes.forEach(n=>{
+    const sp=n.spring;
+    sp.vel+=(sp.target-sp.scale)*CFG.SPRING_K-sp.vel*CFG.SPRING_DAMP;sp.scale+=sp.vel;
+    if(Math.abs(sp.scale-1)<.002&&Math.abs(sp.vel)<.002){sp.scale=1;sp.vel=0;sp.target=1;}
+    if(n.wash.alpha>0)n.wash.alpha=Math.max(0,n.wash.alpha-CFG.WASH_DECAY*dt);
   });
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// § 9  NODE ANIMATION (spring + color wash)
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-function nodePulse(n, targetScale, immediate) {
-  n.spring.target = targetScale;
-  if (immediate) { n.spring.scale = targetScale; n.spring.vel = 0; }
+function tickProd(dt){
+  nodes.forEach(n=>{if(n.owner===OWNER.NONE)return;n.troops=Math.min(n.cap,n.troops+n.prod*dt);});
 }
-
-function updateNodeAnims(dt) {
-  nodes.forEach(n => {
-    // Spring
-    const sp = n.spring;
-    sp.vel += (sp.target - sp.scale) * CFG.SPRING_K - sp.vel * CFG.SPRING_DAMP;
-    sp.scale += sp.vel;
-    // Snap target back to 1 once overshoot calms
-    if (Math.abs(sp.scale-1)<0.002 && Math.abs(sp.vel)<0.002) {
-      sp.scale=1; sp.vel=0; sp.target=1;
-    }
-
-    // Color wash decay
-    if (n.wash.alpha > 0) {
-      n.wash.alpha = Math.max(0, n.wash.alpha - CFG.WASH_DECAY * dt);
-    }
-  });
-}
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// § 10  PRODUCTION
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-function tickProd(dt) {
-  nodes.forEach(n => {
-    if (n.owner===OWNER.NONE) return;
-    n.troops = Math.min(n.cap, n.troops + n.prod*dt);
-  });
-}
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// § 11  AI
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 let aiTimer=0;
-function tickAI(dt) {
-  aiTimer += dt;
-  if (aiTimer < CFG.AI_INTERVAL) return;
-  aiTimer = 0;
-  const aiN = nodes.filter(n => n.owner===OWNER.AI && n.troops>=CFG.AI_MIN_TROOPS);
-  if (!aiN.length) return;
-  const atk = aiN.reduce((a,b) => a.troops>b.troops ? a : b);
-  const tgts = nodes.filter(n => n.owner!==OWNER.AI);
-  if (!tgts.length) return;
-  // Score targets: prefer fewer troops + closer distance
-  const tgt = tgts.reduce((best, t) => {
-    const sb = best.troops + Math.hypot(atk.x-best.x,atk.y-best.y)*0.07;
-    const st = t.troops    + Math.hypot(atk.x-t.x,   atk.y-t.y)*0.07;
-    return st < sb ? t : best;
+function tickAI(dt){
+  aiTimer+=dt;if(aiTimer<CFG.AI_INTERVAL)return;aiTimer=0;
+  const aiN=nodes.filter(n=>n.owner===OWNER.AI&&n.troops>=CFG.AI_MIN_TROOPS);
+  if(!aiN.length)return;
+  const atk=aiN.reduce((a,b)=>a.troops>b.troops?a:b);
+  const tgts=nodes.filter(n=>n.owner!==OWNER.AI);if(!tgts.length)return;
+  const tgt=tgts.reduce((best,t)=>{
+    const sb=best.troops+Math.hypot(atk.x-best.x,atk.y-best.y)*.07;
+    const st=t.troops+Math.hypot(atk.x-t.x,atk.y-t.y)*.07;
+    return st<sb?t:best;
   });
-  launchWave(atk, tgt, OWNER.AI);
+  launchWave(atk,tgt,OWNER.AI);
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// § 12  GAME STATE / TIMER
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-let gameState='playing', endResult=null, gameTime=CFG.GAME_DURATION;
-
-function tickTimer(dt) {
-  if (gameState!=='playing') return;
-  gameTime -= dt;
-  if (gameTime <= 0) { gameTime=0; endGame(); }
-}
-
-function checkWin() {
-  if (gameState!=='playing') return;
-  const p = nodes.filter(n=>n.owner===OWNER.PLAYER).length;
-  const a = nodes.filter(n=>n.owner===OWNER.AI).length;
-  if (a===0 || p===0) endGame();
-}
-
-function endGame() {
-  if (gameState==='ended') return;
-  gameState='ended';
+let gameState='playing',endResult=null,gameTime=CFG.GAME_DURATION;
+function tickTimer(dt){if(gameState!=='playing')return;gameTime-=dt;if(gameTime<=0){gameTime=0;endGame();}}
+function checkWin(){
+  if(gameState!=='playing')return;
   const p=nodes.filter(n=>n.owner===OWNER.PLAYER).length;
   const a=nodes.filter(n=>n.owner===OWNER.AI).length;
-  let pt=0, at=0;
-  nodes.forEach(n=>{
-    if(n.owner===OWNER.PLAYER) pt+=n.troops;
-    if(n.owner===OWNER.AI)     at+=n.troops;
-  });
-  if (p>a)       endResult='player';
-  else if (a>p)  endResult='ai';
-  else if (pt>at)endResult='player';
-  else if (at>pt)endResult='ai';
-  else           endResult='draw';
+  if(a===0||p===0)endGame();
 }
-
-function restart() {
-  currentMap = (currentMap+1) % MAPS.length;
-  gameState='playing'; endResult=null; gameTime=CFG.GAME_DURATION;
-  waves=[]; impacts=[]; aiTimer=0;
-  initNodes(currentMap); layoutNodes();
+function endGame(){
+  if(gameState==='ended')return;gameState='ended';
+  const p=nodes.filter(n=>n.owner===OWNER.PLAYER).length;
+  const a=nodes.filter(n=>n.owner===OWNER.AI).length;
+  let pt=0,at=0;
+  nodes.forEach(n=>{if(n.owner===OWNER.PLAYER)pt+=n.troops;if(n.owner===OWNER.AI)at+=n.troops;});
+  if(p>a)endResult='player';else if(a>p)endResult='ai';
+  else if(pt>at)endResult='player';else if(at>pt)endResult='ai';else endResult='draw';
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// § 13  INPUT
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-let drag=null;
-
-function inputDown(px, py) {
-  if (gameState==='ended') { restart(); return; }
-  const hit = nodeAt(px, py);
-  if (hit) {
-    nodePulse(hit, 1.10, false);
-    if (hit.owner===OWNER.PLAYER && hit.troops>=2)
-      drag = { srcNode:hit, curX:px, curY:py };
+function startGame(advanceMap){
+  if(advanceMap)currentMap=(currentMap+1)%MAPS.length;
+  gameState='playing';endResult=null;gameTime=CFG.GAME_DURATION;
+  waves=[];impacts=[];aiTimer=0;overlayBtns=[];
+  initNodes(currentMap);layoutNodes();
+}
+let drag=null,overlayBtns=[],showCredits=false;
+function inputDown(px,py){
+  // Credits button (always tappable except mid-drag)
+  if(Math.hypot(px-credBtn.x,py-credBtn.y)<credBtn.r+10){showCredits=!showCredits;return;}
+  if(showCredits){showCredits=false;return;}
+  if(gameState==='ended'){
+    for(const b of overlayBtns)if(px>=b.x&&px<=b.x+b.w&&py>=b.y&&py<=b.y+b.h){b.action();return;}
+    return;
   }
+  const hit=nodeAt(px,py);
+  if(hit){nodePulse(hit,1.10);if(hit.owner===OWNER.PLAYER&&hit.troops>=2)drag={srcNode:hit,curX:px,curY:py};}
 }
-function inputMove(px, py) { if (drag) { drag.curX=px; drag.curY=py; } }
-function inputUp(px, py) {
-  if (!drag) return;
-  const dst = nodeAt(px, py);
-  if (dst && dst!==drag.srcNode) {
-    launchWave(drag.srcNode, dst, OWNER.PLAYER);
-    nodePulse(dst, 1.08, false);
-  }
+function inputMove(px,py){if(drag){drag.curX=px;drag.curY=py;}}
+function inputUp(px,py){
+  if(!drag)return;
+  const dst=nodeAt(px,py);
+  if(dst&&dst!==drag.srcNode){launchWave(drag.srcNode,dst,OWNER.PLAYER);nodePulse(dst,1.08);}
   drag=null;
 }
-
-canvas.addEventListener('touchstart', e=>{e.preventDefault();const t=e.changedTouches[0];inputDown(t.clientX,t.clientY);},{passive:false});
-canvas.addEventListener('touchmove',  e=>{e.preventDefault();const t=e.changedTouches[0];inputMove(t.clientX,t.clientY);},{passive:false});
-canvas.addEventListener('touchend',   e=>{e.preventDefault();const t=e.changedTouches[0];inputUp(t.clientX,t.clientY);},{passive:false});
+canvas.addEventListener('touchstart',e=>{e.preventDefault();const t=e.changedTouches[0];inputDown(t.clientX,t.clientY);},{passive:false});
+canvas.addEventListener('touchmove', e=>{e.preventDefault();const t=e.changedTouches[0];inputMove(t.clientX,t.clientY);},{passive:false});
+canvas.addEventListener('touchend',  e=>{e.preventDefault();const t=e.changedTouches[0];inputUp(t.clientX,t.clientY);},{passive:false});
 canvas.addEventListener('touchcancel',()=>{drag=null;});
-canvas.addEventListener('mousedown', e=>inputDown(e.clientX,e.clientY));
-canvas.addEventListener('mousemove', e=>inputMove(e.clientX,e.clientY));
-canvas.addEventListener('mouseup',   e=>inputUp(e.clientX,e.clientY));
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// § 14  RENDER SUBSYSTEMS
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-// § 14a  Edges
-function drawEdges() {
+canvas.addEventListener('mousedown',e=>inputDown(e.clientX,e.clientY));
+canvas.addEventListener('mousemove',e=>inputMove(e.clientX,e.clientY));
+canvas.addEventListener('mouseup',  e=>inputUp(e.clientX,e.clientY));
+function drawEdges(){
   ctx.save();
-  // Only show edges faintly; highlight edges connected to drag source
-  activeEdges.forEach(([a,b]) => {
-    const na=nodes[a], nb=nodes[b];
-    const isDragEdge = drag && (drag.srcNode.id===a||drag.srcNode.id===b);
-    ctx.strokeStyle = isDragEdge ? PAL.edgeDrag : PAL.edge;
-    ctx.lineWidth   = isDragEdge ? 1.8 : 1.0;
-    ctx.globalAlpha = isDragEdge ? 0.7 : 0.4;
-    ctx.setLineDash(isDragEdge ? [] : [3,7]);
-    ctx.beginPath(); ctx.moveTo(na.x,na.y); ctx.lineTo(nb.x,nb.y); ctx.stroke();
+  activeEdges.forEach(([a,b])=>{
+    const na=nodes[a],nb=nodes[b],hi=drag&&(drag.srcNode.id===a||drag.srcNode.id===b);
+    ctx.strokeStyle=hi?PAL.edgeDrag:PAL.edge;ctx.lineWidth=hi?1.8:1.0;
+    ctx.globalAlpha=hi?.70:.38;ctx.setLineDash(hi?[]:[3,7]);
+    ctx.beginPath();ctx.moveTo(na.x,na.y);ctx.lineTo(nb.x,nb.y);ctx.stroke();
   });
-  ctx.setLineDash([]); ctx.globalAlpha=1; ctx.restore();
+  ctx.setLineDash([]);ctx.globalAlpha=1;ctx.restore();
 }
-
-// § 14b  Wave particles (diamond shape + ghost trail)
-function drawWaves() {
-  waves.forEach(w => {
-    const rgb = ownerRgb(w.owner);
-    const spacing = CFG.PARTICLE_GAP;          // gap between consecutive dots in t-space
-    const clusterSize = CFG.WAVE_CLUSTER_SIZE;
-    const clusterGap  = CFG.WAVE_CLUSTER_GAP;
-
-    for (let i=0; i<w.totalDots; i++) {
-      // Cluster grouping: add extra gap every clusterSize particles
-      const clusterOffset = Math.floor(i/clusterSize) * clusterGap;
-      const dotT = w.t - i*spacing - clusterOffset;
-      if (dotT <= 0) break;    // not launched yet
-      if (dotT >= 1) continue; // already arrived
-
-      const et = easedT(Math.min(1, Math.max(0, dotT)));
-
-      // Bezier position
-      const bp = bezierPoint(w.sx,w.sy,w.cpx,w.cpy,w.ex,w.ey,et);
-
-      // Lateral jitter: stable per-particle, oscillates along path
-      const jitter = w.jitterSeeds[i] * CFG.LATERAL_JITTER *
-                     Math.sin(dotT * CFG.JITTER_FREQ * Math.PI);
-      // Perpendicular to travel direction (approx from bezier tangent)
-      const et2 = easedT(Math.min(1,Math.max(0,dotT+0.01)));
-      const bp2 = bezierPoint(w.sx,w.sy,w.cpx,w.cpy,w.ex,w.ey,et2);
-      const tdx=bp2.x-bp.x, tdy=bp2.y-bp.y, tlen=Math.hypot(tdx,tdy)||1;
-      const px2 = bp.x + (-tdy/tlen)*jitter;
-      const py2 = bp.y + ( tdx/tlen)*jitter;
-
-      // Ghost trail
-      if (!CFG.REDUCED_MOTION && i===0) { // only trail head particle
-        for (let tr=1; tr<=CFG.TRAIL_LEN; tr++) {
-          const trT = easedT(Math.max(0, dotT - tr*0.018));
-          const tbp = bezierPoint(w.sx,w.sy,w.cpx,w.cpy,w.ex,w.ey,trT);
-          const ta  = CFG.TRAIL_ALPHA_MAX * Math.pow(CFG.TRAIL_FADE, tr);
-          ctx.globalAlpha = ta;
-          ctx.fillStyle   = `rgb(${rgb})`;
-          const ts = CFG.PARTICLE_SIZE * (1 - tr*0.14);
-          drawDiamond(tbp.x, tbp.y, ts);
+function diamond(x,y,s){
+  ctx.beginPath();ctx.moveTo(x,y-s);ctx.lineTo(x+s,y);ctx.lineTo(x,y+s);ctx.lineTo(x-s,y);ctx.closePath();ctx.fill();
+}
+function drawWaves(){
+  waves.forEach(w=>{
+    const rgb=ownerRgb(w.owner);
+    for(let i=0;i<w.totalDots;i++){
+      const clOff=Math.floor(i/CFG.WAVE_CLUSTER_SIZE)*CFG.WAVE_CLUSTER_GAP;
+      const dotT=w.t-i*CFG.PARTICLE_GAP-clOff;
+      if(dotT<=0)break;if(dotT>=1)continue;
+      const et=easedT(Math.min(1,Math.max(0,dotT)));
+      const bp=bezierPt(w.sx,w.sy,w.cpx,w.cpy,w.ex,w.ey,et);
+      const et2=easedT(Math.min(1,Math.max(0,dotT+.01)));
+      const bp2=bezierPt(w.sx,w.sy,w.cpx,w.cpy,w.ex,w.ey,et2);
+      const tdx=bp2.x-bp.x,tdy=bp2.y-bp.y,tlen=Math.hypot(tdx,tdy)||1;
+      const jit=w.jitterSeeds[i]*CFG.LATERAL_JITTER*Math.sin(dotT*CFG.JITTER_FREQ*Math.PI);
+      const px=bp.x+(-tdy/tlen)*jit,py=bp.y+(tdx/tlen)*jit;
+      if(!CFG.REDUCED_MOTION&&i===0){
+        for(let tr=1;tr<=CFG.TRAIL_LEN;tr++){
+          const tbp=bezierPt(w.sx,w.sy,w.cpx,w.cpy,w.ex,w.ey,easedT(Math.max(0,dotT-tr*.018)));
+          ctx.globalAlpha=CFG.TRAIL_ALPHA_MAX*Math.pow(CFG.TRAIL_FADE,tr);
+          ctx.fillStyle='rgb('+rgb+')';diamond(tbp.x,tbp.y,CFG.PARTICLE_SIZE*(1-tr*.14));
         }
         ctx.globalAlpha=1;
       }
-
-      // Main diamond
-      const alpha = 0.85 + 0.15 * (1 - dotT); // slightly brighter near source
-      ctx.globalAlpha = alpha;
-      ctx.fillStyle   = `rgb(${rgb})`;
-      drawDiamond(px2, py2, CFG.PARTICLE_SIZE);
+      ctx.globalAlpha=.85+.15*(1-dotT);ctx.fillStyle='rgb('+rgb+')';diamond(px,py,CFG.PARTICLE_SIZE);
     }
     ctx.globalAlpha=1;
   });
 }
-
-function drawDiamond(x, y, s) {
-  ctx.beginPath();
-  ctx.moveTo(x,   y-s);
-  ctx.lineTo(x+s, y  );
-  ctx.lineTo(x,   y+s);
-  ctx.lineTo(x-s, y  );
-  ctx.closePath();
-  ctx.fill();
-}
-
-// § 14c  Impact splats
-function drawImpacts() {
-  if (CFG.REDUCED_MOTION) return;
-  impacts.forEach(p => {
-    const frac = p.life/p.maxLife;
-    ctx.globalAlpha = frac * 0.85;
-    ctx.fillStyle   = `rgb(${p.rgb})`;
-    const s = CFG.IMPACT_SIZE * (0.5 + frac*0.5);
-    drawDiamond(p.x, p.y, s);
+function drawImpacts(){
+  if(CFG.REDUCED_MOTION)return;
+  impacts.forEach(p=>{
+    const f=p.life/p.maxLife;ctx.globalAlpha=f*.85;ctx.fillStyle='rgb('+p.rgb+')';
+    diamond(p.x,p.y,CFG.IMPACT_SIZE*(.5+f*.5));
   });
   ctx.globalAlpha=1;
 }
-
-// § 14d  Node rendering
-function drawNode(n) {
-  const r  = nodeRadius(n);
-  const cx = n.x, cy = n.y;
-  const isPow = n.type==='power';
-  const isSel = drag && drag.srcNode===n;
-  const sc    = n.spring.scale;
-
+function drawNode(n){
+  const r=nodeRadius(n),cx=n.x,cy=n.y,isPow=n.type==='power',isSel=drag&&drag.srcNode===n,sc=n.spring.scale;
+  ctx.save();ctx.translate(cx,cy);ctx.scale(sc,sc);ctx.translate(-cx,-cy);
+  const ha=isSel?.32:isPow?.20:.11,hr=r*(isPow?2.2:1.7);
+  const hrgb=n.owner===OWNER.PLAYER?PAL.playerRgb:n.owner===OWNER.AI?PAL.aiRgb:isPow?'200,68,255':'80,80,120';
+  const hg=ctx.createRadialGradient(cx,cy,r*.3,cx,cy,hr);
+  hg.addColorStop(0,'rgba('+hrgb+','+ha+')');hg.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.beginPath();ctx.arc(cx,cy,hr,0,Math.PI*2);ctx.fillStyle=hg;ctx.fill();
+  const fg=ctx.createRadialGradient(cx-r*.3,cy-r*.3,0,cx,cy,r);
+  fg.addColorStop(0,ownerColor(n.owner,false));fg.addColorStop(1,ownerColor(n.owner,true));
+  ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.fillStyle=fg;ctx.fill();
+  if(n.wash.alpha>0){ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.fillStyle='rgba('+n.wash.rgb+','+n.wash.alpha*.55+')';ctx.fill();}
+  ctx.lineWidth=isPow?2.8:isSel?2.8:1.8;
+  ctx.strokeStyle=isPow?PAL.power:isSel?(n.owner===OWNER.PLAYER?'#66ccff':'#ff8855'):ownerColor(n.owner,false);
+  ctx.stroke();
+  if(isSel){ctx.lineWidth=1.5;ctx.strokeStyle='rgba('+PAL.playerRgb+',.38)';ctx.beginPath();ctx.arc(cx,cy,r*1.35,0,Math.PI*2);ctx.stroke();}
+  if(isPow){ctx.save();ctx.globalAlpha=.55;ctx.font=Math.round(r*.70)+'px monospace';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillStyle=PAL.power;ctx.fillText('⬡',cx,cy-r*.05);ctx.restore();}
+  const lbl=Math.floor(n.troops).toString(),fs=Math.round(r*.68);
+  ctx.font='bold '+fs+'px Courier New,monospace';ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillStyle='rgba(0,0,0,.6)';ctx.fillText(lbl,cx+1,cy+1.5);
+  ctx.fillStyle=PAL.text;ctx.fillText(lbl,cx,cy);
+  ctx.restore();
+}
+function drawDragLine(){
+  if(!drag)return;
+  const{srcNode:s,curX,curY}=drag;
   ctx.save();
-  ctx.translate(cx,cy); ctx.scale(sc,sc); ctx.translate(-cx,-cy);
-
-  // Halo glow
-  const ha = isSel?0.32 : isPow?0.20 : 0.11;
-  const hr = r*(isPow?2.2:1.7);
-  const hrgb = n.owner===OWNER.PLAYER ? PAL.playerRgb
-             : n.owner===OWNER.AI     ? PAL.aiRgb
-             : isPow                  ? '200,68,255'
-             : '80,80,120';
-  const hg = ctx.createRadialGradient(cx,cy,r*.3,cx,cy,hr);
-  hg.addColorStop(0, `rgba(${hrgb},${ha})`);
-  hg.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.beginPath(); ctx.arc(cx,cy,hr,0,Math.PI*2);
-  ctx.fillStyle=hg; ctx.fill();
-
-  // Base fill
-  const fg = ctx.createRadialGradient(cx-r*.3,cy-r*.3,0,cx,cy,r);
-  fg.addColorStop(0, ownerColor(n.owner,false));
-  fg.addColorStop(1, ownerColor(n.owner,true));
-  ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2);
-  ctx.fillStyle=fg; ctx.fill();
-
-  // Color-wash overlay on capture
-  if (n.wash.alpha > 0) {
-    ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2);
-    ctx.fillStyle=`rgba(${n.wash.rgb},${n.wash.alpha*0.55})`;
-    ctx.fill();
-  }
-
-  // Border
-  const bw = isPow?2.8 : isSel?2.8 : 1.8;
-  const bc = isPow ? PAL.power
-           : isSel ? (n.owner===OWNER.PLAYER?'#66ccff':'#ff8855')
-           : ownerColor(n.owner,false);
-  ctx.lineWidth=bw; ctx.strokeStyle=bc; ctx.stroke();
-
-  // Selected ring pulse
-  if (isSel) {
-    ctx.lineWidth=1.5; ctx.strokeStyle=`rgba(${PAL.playerRgb},0.4)`;
-    ctx.beginPath(); ctx.arc(cx,cy,r*1.35,0,Math.PI*2); ctx.stroke();
-  }
-
-  // Power node glyph
-  if (isPow) {
-    ctx.save(); ctx.globalAlpha=0.55;
-    ctx.font=`${Math.round(r*.70)}px monospace`;
-    ctx.textAlign='center'; ctx.textBaseline='middle';
-    ctx.fillStyle=PAL.power; ctx.fillText('⬡',cx,cy-r*.05);
-    ctx.restore();
-  }
-
-  // Troop count — large and dominant (State.io style)
-  const lbl = Math.floor(n.troops).toString();
-  const fs  = Math.round(r * .68);
-  ctx.font=`bold ${fs}px 'Courier New',monospace`;
-  ctx.textAlign='center'; ctx.textBaseline='middle';
-  // Shadow
-  ctx.fillStyle='rgba(0,0,0,.6)'; ctx.fillText(lbl,cx+1,cy+1.5);
-  // Main text
-  ctx.fillStyle=PAL.text; ctx.fillText(lbl,cx,cy);
-
+  ctx.strokeStyle='rgba('+PAL.playerRgb+',.60)';ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(s.x,s.y);ctx.lineTo(curX,curY);ctx.stroke();
+  const sent=Math.floor(s.troops*CFG.SEND_FRAC),mx=(s.x+curX)/2,my=(s.y+curY)/2-12;
+  ctx.font='bold 12px Courier New';ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillStyle='rgba(0,0,0,.6)';ctx.fillText('⟶'+sent,mx+1,my+1);
+  ctx.fillStyle='rgba('+PAL.playerRgb+',1)';ctx.fillText('⟶'+sent,mx,my);
+  const ang=Math.atan2(curY-s.y,curX-s.x);
+  ctx.beginPath();ctx.moveTo(curX,curY);
+  ctx.lineTo(curX-Math.cos(ang-.4)*14,curY-Math.sin(ang-.4)*14);
+  ctx.lineTo(curX-Math.cos(ang+.4)*14,curY-Math.sin(ang+.4)*14);
+  ctx.closePath();ctx.fillStyle='rgba('+PAL.playerRgb+',.75)';ctx.fill();
   ctx.restore();
 }
 
-// § 14e  Drag arrow
-function drawDragLine() {
-  if (!drag) return;
-  const { srcNode:s, curX, curY } = drag;
-  const rgb = PAL.playerRgb;
+// Credits button (drawn bottom-left)
+const credBtn={x:28,y:0,r:14}; // y set in resize
+function updateCredBtnPos(){credBtn.y=H-22;}
 
+function drawCredBtn(){
+  const cb=credBtn;
   ctx.save();
-  ctx.strokeStyle=`rgba(${rgb},0.60)`; ctx.lineWidth=2;
-  ctx.beginPath(); ctx.moveTo(s.x,s.y); ctx.lineTo(curX,curY); ctx.stroke();
-
-  // Send count badge
-  const sent = Math.floor(s.troops*CFG.SEND_FRAC);
-  const mx=(s.x+curX)/2, my=(s.y+curY)/2-12;
-  ctx.font='bold 12px Courier New'; ctx.textAlign='center'; ctx.textBaseline='middle';
-  ctx.fillStyle='rgba(0,0,0,.6)'; ctx.fillText('⟶'+sent, mx+1, my+1);
-  ctx.fillStyle=`rgba(${rgb},1)`;  ctx.fillText('⟶'+sent, mx, my);
-
-  // Arrowhead
-  const ang = Math.atan2(curY-s.y, curX-s.x);
-  ctx.beginPath();
-  ctx.moveTo(curX, curY);
-  ctx.lineTo(curX-Math.cos(ang-0.4)*14, curY-Math.sin(ang-0.4)*14);
-  ctx.lineTo(curX-Math.cos(ang+0.4)*14, curY-Math.sin(ang+0.4)*14);
-  ctx.closePath();
-  ctx.fillStyle=`rgba(${rgb},0.75)`; ctx.fill();
+  ctx.beginPath();ctx.arc(cb.x,cb.y,cb.r,0,Math.PI*2);
+  ctx.fillStyle='rgba(20,20,40,0.80)';ctx.fill();
+  ctx.strokeStyle='rgba(100,100,160,0.60)';ctx.lineWidth=1.2;ctx.stroke();
+  ctx.font='bold 13px Courier New,monospace';
+  ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillStyle='rgba(160,160,220,0.80)';ctx.fillText('i',cb.x,cb.y+1);
   ctx.restore();
 }
 
-// § 14f  End screen
-function drawOverlay() {
-  if (gameState!=='ended') return;
-  ctx.fillStyle=PAL.overlayBg; ctx.fillRect(0,0,W,H);
-  const cx=W/2, cy=H/2;
-  const won=endResult==='player', draw=endResult==='draw';
+function drawCreditsScreen(){
+  const cx=W/2,cy=H/2;
+  // backdrop
+  ctx.save();
+  ctx.fillStyle='rgba(4,4,14,0.94)';ctx.fillRect(0,0,W,H);
+  // panel
+  const pw=Math.min(340,W-40),ph=260,px2=cx-pw/2,py2=cy-ph/2;
+  ctx.beginPath();roundRect(ctx,px2,py2,pw,ph,14);
+  ctx.fillStyle='rgba(14,14,28,0.97)';ctx.fill();
+  ctx.strokeStyle='rgba(80,80,140,0.70)';ctx.lineWidth=1.5;ctx.stroke();
+  // title
+  ctx.font='bold 22px Courier New,monospace';ctx.textAlign='center';ctx.textBaseline='top';
+  ctx.fillStyle='#cc44ff';ctx.shadowColor='#cc44ff';ctx.shadowBlur=18;
+  ctx.fillText('NEURON WARS',cx,py2+18);ctx.shadowBlur=0;
+  // subtitle
+  ctx.font='10px Courier New,monospace';ctx.fillStyle='rgba(160,160,200,.55)';
+  ctx.fillText('A YouTube Playable · v0.3',cx,py2+46);
+  // divider
+  ctx.strokeStyle='rgba(80,80,140,0.40)';ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(px2+20,py2+64);ctx.lineTo(px2+pw-20,py2+64);ctx.stroke();
+  // credits heading
+  ctx.font='bold 11px Courier New,monospace';ctx.fillStyle='rgba(200,200,220,.70)';
+  ctx.fillText('CREDITS',cx,py2+76);
+  // contributor
+  ctx.shadowBlur=0;
+  ctx.font='bold 15px Courier New,monospace';ctx.fillStyle='#2299ff';
+  ctx.fillText('Pankaj',cx,py2+100);
+  ctx.font='10px Courier New,monospace';ctx.fillStyle='rgba(150,180,255,.65)';
+  ctx.fillText('linkedin.com/in/genai-guru-pankaj',cx,py2+122);
+  ctx.fillText('x.com/pankajtiw',cx,py2+138);
+  // built with
+  ctx.strokeStyle='rgba(80,80,140,0.40)';ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(px2+20,py2+158);ctx.lineTo(px2+pw-20,py2+158);ctx.stroke();
+  ctx.font='10px Courier New,monospace';ctx.fillStyle='rgba(130,130,170,.55)';
+  ctx.fillText('Built with Claude · Vanilla JS · Zero dependencies',cx,py2+172);
+  ctx.fillText('Single index.html · YouTube Playables spec',cx,py2+188);
+  // dismiss hint
+  const pulse=.5+.5*Math.sin(Date.now()/550);
+  ctx.font='10px Courier New,monospace';
+  ctx.fillStyle='rgba(140,140,180,'+pulse.toFixed(2)+')';
+  ctx.fillText('tap anywhere to close',cx,py2+ph-20);
+  ctx.restore();
+}
+
+function roundRect(c,x,y,w,h,r){
+  c.beginPath();c.moveTo(x+r,y);c.lineTo(x+w-r,y);
+  c.arcTo(x+w,y,x+w,y+h,r);c.lineTo(x+w,y+h-r);
+  c.arcTo(x+w,y+h,x,y+h,r);c.lineTo(x+r,y+h);
+  c.arcTo(x,y+h,x,y,r);c.lineTo(x,y+r);
+  c.arcTo(x,y,x+w,y,r);c.closePath();
+}
+
+function pillBtn(x,y,w,h,label,col,alpha){
+  ctx.save();ctx.globalAlpha=alpha;
+  const r=h/2;
+  ctx.beginPath();ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);ctx.lineTo(x+w,y+h-r);
+  ctx.arcTo(x+w,y+h,x,y+h,r);ctx.lineTo(x+r,y+h);
+  ctx.arcTo(x,y+h,x,y,r);ctx.lineTo(x,y+r);
+  ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+  ctx.fillStyle='rgba(8,8,20,.88)';ctx.fill();
+  ctx.strokeStyle=col;ctx.lineWidth=2;ctx.stroke();
+  ctx.font='bold 14px Courier New,monospace';ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.shadowColor=col;ctx.shadowBlur=10;ctx.fillStyle=col;ctx.fillText(label,x+w/2,y+h/2);
+  ctx.restore();
+}
+function drawOverlay(){
+  if(gameState!=='ended')return;
+  ctx.fillStyle=PAL.overlayBg;ctx.fillRect(0,0,W,H);
+  const cx=W/2,cy=H/2,won=endResult==='player',draw=endResult==='draw';
   const txt=won?'YOU WIN':draw?'DRAW':'YOU LOSE';
   const col=won?PAL.winText:draw?PAL.drawText:PAL.loseText;
-  ctx.textAlign='center'; ctx.textBaseline='middle';
-  ctx.save();
-  ctx.shadowColor=col; ctx.shadowBlur=30;
-  ctx.font=`bold ${Math.round(W*.10)}px 'Courier New',monospace`;
-  ctx.fillStyle=col; ctx.fillText(txt,cx,cy-30);
+  ctx.save();ctx.shadowColor=col;ctx.shadowBlur=28;
+  ctx.font='bold '+Math.round(W*.10)+'px Courier New,monospace';
+  ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillStyle=col;ctx.fillText(txt,cx,cy-58);
   ctx.restore();
-
-  let pN=0,aN=0;
-  nodes.forEach(n=>{if(n.owner===OWNER.PLAYER)pN++;if(n.owner===OWNER.AI)aN++;});
-  ctx.font=`14px 'Courier New',monospace`; ctx.fillStyle='rgba(200,200,220,.80)';
-  ctx.fillText(`nodes  YOU ${pN}  ·  AI ${aN}`,cx,cy+22);
-
-  const nextMap = MAPS[(currentMap+1)%MAPS.length].name;
-  ctx.font=`11px 'Courier New',monospace`; ctx.fillStyle='rgba(140,140,180,.70)';
-  ctx.fillText(`next map: ${nextMap}`,cx,cy+46);
-
-  const pulse = .55+.45*Math.sin(Date.now()/420);
-  ctx.font=`12px 'Courier New',monospace`;
-  ctx.fillStyle=`rgba(160,160,200,${pulse})`;
-  ctx.fillText('tap anywhere to continue',cx,cy+70);
-}
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// § 15  HUD UPDATE
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-const hudP   = document.getElementById('hud-player');
-const hudT   = document.getElementById('hud-timer');
-const hudA   = document.getElementById('hud-ai');
-const barP   = document.getElementById('bar-player');
-const barA   = document.getElementById('bar-ai');
-const barN   = document.getElementById('bar-neutral');
-
-function updateHUD() {
-  let pt=0, at=0, pn=0, an=0, nn=0;
-  nodes.forEach(n=>{
-    if(n.owner===OWNER.PLAYER){pt+=Math.floor(n.troops);pn++;}
-    else if(n.owner===OWNER.AI){at+=Math.floor(n.troops);an++;}
-    else nn++;
-  });
-  hudP.textContent=`YOU ▸ ${pt}`;
-  hudA.textContent=`AI ◂ ${at}`;
-  const s=Math.ceil(gameTime);
-  hudT.textContent=s;
-  hudT.style.color=s<=10?PAL.timerWarn:'#eee';
-
-  // Proportion bar
-  const total=nodes.length;
-  barP.style.width=`${(pn/total*100).toFixed(1)}%`;
-  barA.style.width=`${(an/total*100).toFixed(1)}%`;
-  barN.style.width=`${(nn/total*100).toFixed(1)}%`;
-}
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// § 16  FPS
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-const fpsEl=document.getElementById('fps-counter');
-let fpsLast=0, fpsCount=0;
-function trackFPS(now) {
-  fpsCount++;
-  if (now-fpsLast>=1000) { fpsEl.textContent=fpsCount+' fps'; fpsCount=0; fpsLast=now; }
-}
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// § 17  MAIN LOOP
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-let lastTime=0;
-function loop(now) {
-  const dt = Math.min((now-lastTime)/1000, .1);
-  lastTime = now;
-
-  if (gameState==='playing') {
-    tickTimer(dt);
-    tickProd(dt);
-    updateWaves(dt);
-    updateImpacts(dt);
-    tickAI(dt);
+  let pN=0,aN=0;nodes.forEach(n=>{if(n.owner===OWNER.PLAYER)pN++;if(n.owner===OWNER.AI)aN++;});
+  ctx.font='13px Courier New,monospace';ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillStyle='rgba(200,200,220,.78)';ctx.fillText('nodes  YOU '+pN+'  ·  AI '+aN,cx,cy-12);
+  ctx.font='10px Courier New,monospace';ctx.fillStyle='rgba(130,130,170,.55)';
+  ctx.fillText('map: '+MAPS[currentMap].name,cx,cy+8);
+  overlayBtns=[];
+  const BW=Math.min(158,W*.36),BH=48,gap=16,totalW=BW*2+gap,bx=cx-totalW/2,by=cy+32;
+  pillBtn(bx,by,BW,BH,'RETRY',PAL.player,1.0);
+  overlayBtns.push({x:bx,y:by,w:BW,h:BH,action:()=>startGame(false)});
+  const nmCol=won?PAL.winText:PAL.neutral,nmAlpha=won?1.0:.38;
+  pillBtn(bx+BW+gap,by,BW,BH,'NEXT MAP',nmCol,nmAlpha);
+  overlayBtns.push({x:bx+BW+gap,y:by,w:BW,h:BH,action:()=>startGame(true)});
+  if(won){
+    ctx.font='9px Courier New,monospace';ctx.textAlign='center';ctx.textBaseline='top';
+    ctx.fillStyle='rgba(68,255,170,.50)';
+    ctx.fillText(MAPS[(currentMap+1)%MAPS.length].name.toUpperCase(),bx+BW+gap+BW/2,by+BH+6);
   }
+}
+const hudP=document.getElementById('hud-player'),hudT=document.getElementById('hud-timer'),hudA=document.getElementById('hud-ai');
+const barP=document.getElementById('bar-player'),barA=document.getElementById('bar-ai'),barN=document.getElementById('bar-neutral');
+function updateHUD(){
+  let pt=0,at=0,pn=0,an=0,nn=0;
+  nodes.forEach(n=>{if(n.owner===OWNER.PLAYER){pt+=Math.floor(n.troops);pn++;}else if(n.owner===OWNER.AI){at+=Math.floor(n.troops);an++;}else nn++;});
+  hudP.textContent='YOU ▸ '+pt;hudA.textContent='AI ◂ '+at;
+  const s=Math.ceil(gameTime);hudT.textContent=s;hudT.style.color=s<=10?PAL.timerWarn:'#eee';
+  const tot=nodes.length;
+  barP.style.width=(pn/tot*100).toFixed(1)+'%';
+  barA.style.width=(an/tot*100).toFixed(1)+'%';
+  barN.style.width=(nn/tot*100).toFixed(1)+'%';
+}
+const fpsEl=document.getElementById('fps-counter');let fpsLast=0,fpsCount=0;
+function trackFPS(now){fpsCount++;if(now-fpsLast>=1000){fpsEl.textContent=fpsCount+' fps';fpsCount=0;fpsLast=now;}}
+let lastTime=0;
+function loop(now){
+  const dt=Math.min((now-lastTime)/1000,.1);lastTime=now;
+  if(gameState==='playing'){tickTimer(dt);tickProd(dt);updateWaves(dt);updateImpacts(dt);tickAI(dt);}
   updateNodeAnims(dt);
-
   ctx.clearRect(0,0,W,H);
-  drawEdges();
-  drawImpacts();
-  drawWaves();
-  nodes.forEach(drawNode);
-  drawDragLine();
-  drawOverlay();
-  updateHUD();
-  trackFPS(now);
+  drawEdges();drawImpacts();drawWaves();nodes.forEach(drawNode);drawDragLine();drawOverlay();drawCredBtn();if(showCredits)drawCreditsScreen();
+  updateHUD();trackFPS(now);
   requestAnimationFrame(loop);
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// § 18  BOOT
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-initNodes(currentMap);
-resize();
-requestAnimationFrame(ts => { lastTime=ts; fpsLast=ts; loop(ts); });
+initNodes(currentMap);resize();
+requestAnimationFrame(ts=>{lastTime=ts;fpsLast=ts;loop(ts);});
 </script>
 </body>
 </html>
