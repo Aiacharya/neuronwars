@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Neuron Wars</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a12;
+    overflow: hidden;
+    width: 100vw; height: 100vh;
+    font-family: 'Courier New', monospace;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  #game-canvas { display: block; }
+  #hud {
+    position: fixed; top: 0; left: 0; right: 0;
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 8px 16px;
+    background: rgba(10,10,18,0.90);
+    border-bottom: 1px solid #1a1a2e;
+    pointer-events: none; z-index: 10; height: 40px;
+  }
+  #hud-player { color: #4af; font-size: 13px; font-weight: bold; }
+  #hud-timer  { color: #eee; font-size: 14px; font-weight: bold; letter-spacing: 1px; }
+  #hud-ai     { color: #f64; font-size: 13px; font-weight: bold; }
+  #fps-counter {
+    position: fixed; bottom: 6px; right: 10px;
+    color: #333; font-size: 10px; font-family: monospace;
+    pointer-events: none; z-index: 20;
+  }
+  #version-tag {
+    position: fixed; bottom: 6px; left: 10px;
+    color: #2a2a3a; font-size: 10px; font-family: monospace;
+    pointer-events: none; z-index: 20;
+  }
+</style>
+</head>
+<body>
+<div id="hud">
+  <span id="hud-player">YOU ▸ 0</span>
+  <span id="hud-timer">60</span>
+  <span id="hud-ai">AI ◂ 0</span>
+</div>
+<canvas id="game-canvas"></canvas>
+<div id="fps-counter">-- fps</div>
+<div id="version-tag">v0.2 combat</div>
+<script>
+// ═══ CONSTANTS ═══════════════════════════════════════════════════════════════
+const OWNER = { NONE: 0, PLAYER: 1, AI: 2 };
+const C = {
+  bg:'#0a0a12', edgeLine:'#1c1c30',
+  neutral:'#4a4a6c', neutralLo:'#24243a',
+  player:'#2299ff', playerLo:'#0d3366', playerPtcl:'rgba(34,153,255,',
+  ai:'#ff5522',     aiLo:'#661800',     aiPtcl:'rgba(255,85,34,',
+  power:'#cc44ff',  powerLo:'#440d66',
+  text:'#ffffff',   timerWarn:'#ff4433',
+  overlayBg:'rgba(5,5,14,0.88)',
+  winText:'#44ffaa', loseText:'#ff4433', drawText:'#cccc44',
+};
+const WAVE_SPEED    = 130;
+const AI_INTERVAL   = 1.5;
+const SEND_FRAC     = 0.50;
+const GAME_DURATION = 60;
+const HIT_MUL       = 1.6;
+const PTCL_COUNT    = 7;
+
+// ═══ CANVAS ═══════════════════════════════════════════════════════════════════
+const canvas = document.getElementById('game-canvas');
+const ctx    = canvas.getContext('2d');
+let W = 0, H = 0;
+function resize() {
+  W = canvas.width  = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  layoutNodes();
+}
+window.addEventListener('resize', resize);
+
+// ═══ NODES ════════════════════════════════════════════════════════════════════
+const NODE_DEFS = [
+  {id:0,fx:.28,fy:.80,owner:OWNER.PLAYER,troops:15,cap:20,prod:1.2,type:'normal'},
+  {id:1,fx:.72,fy:.80,owner:OWNER.PLAYER,troops:15,cap:20,prod:1.2,type:'normal'},
+  {id:2,fx:.28,fy:.20,owner:OWNER.AI,    troops:15,cap:20,prod:1.2,type:'normal'},
+  {id:3,fx:.72,fy:.20,owner:OWNER.AI,    troops:15,cap:20,prod:1.2,type:'normal'},
+  {id:4,fx:.30,fy:.50,owner:OWNER.NONE,  troops:8, cap:25,prod:1.8,type:'power'},
+  {id:5,fx:.70,fy:.50,owner:OWNER.NONE,  troops:8, cap:25,prod:1.8,type:'power'},
+  {id:6,fx:.50,fy:.33,owner:OWNER.NONE,  troops:5, cap:15,prod:0.8,type:'neutral'},
+  {id:7,fx:.50,fy:.67,owner:OWNER.NONE,  troops:5, cap:15,prod:0.8,type:'neutral'},
+];
+const EDGES=[[0,7],[1,7],[2,6],[3,6],[0,4],[1,5],[2,4],[3,5],[4,6],[5,6],[4,7],[5,7],[6,7]];
+let nodes = [];
+
+function initNodes() { nodes = NODE_DEFS.map(d=>({...d,x:0,y:0})); }
+
+function layoutNodes() {
+  const tp=44, bp=26, uh=H-tp-bp;
+  nodes.forEach(n=>{
+    const d=NODE_DEFS[n.id];
+    n.x=d.fx*W; n.y=tp+d.fy*uh;
+  });
+}
+
+function nodeRadius(n) { return 18+(n.cap/30)*16; }
+
+function nodeAt(px,py) {
+  let best=null, bd=Infinity;
+  nodes.forEach(n=>{
+    const d=Math.hypot(n.x-px,n.y-py);
+    if(d<bd){bd=d;best=n;}
+  });
+  return (best&&bd<nodeRadius(best)*HIT_MUL)?best:null;
+}
+
+// ═══ WAVES ════════════════════════════════════════════════════════════════════
+let waves=[], waveId=0;
+
+function launchWave(src,dst,owner) {
+  if(src.id===dst.id||src.owner!==owner) return;
+  const sent=Math.floor(src.troops*SEND_FRAC);
+  if(sent<1) return;
+  src.troops-=sent;
+  const dist=Math.hypot(dst.x-src.x,dst.y-src.y)||1;
+  waves.push({id:waveId++,owner,srcId:src.id,dstId:dst.id,sent,
+    t:0,duration:dist/WAVE_SPEED,sx:src.x,sy:src.y,dx:dst.x,dy:dst.y});
+}
+
+function updateWaves(dt) {
+  const done=[];
+  waves.forEach(w=>{ w.t+=dt/w.duration; if(w.t>=1)done.push(w); });
+  done.forEach(w=>{ waves=waves.filter(x=>x!==w); resolveArrival(w); });
+}
+
+function resolveArrival(w) {
+  const dst=nodes[w.dstId];
+  if(dst.owner===w.owner) {
+    dst.troops=Math.min(dst.cap, dst.troops+w.sent);
+  } else if(w.sent>dst.troops) {
+    dst.owner=w.owner;
+    dst.troops=w.sent-dst.troops;
+  } else {
+    dst.troops-=w.sent;
+    if(dst.troops<=0&&dst.owner!==OWNER.NONE){dst.owner=OWNER.NONE;dst.troops=0;}
+  }
+  checkWin();
+}
+
+// ═══ PRODUCTION ══════════════════════════════════════════════════════════════
+function tickProd(dt) {
+  nodes.forEach(n=>{
+    if(n.owner===OWNER.NONE) return;
+    n.troops=Math.min(n.cap, n.troops+n.prod*dt);
+  });
+}
+
+// ═══ DUMB AI ══════════════════════════════════════════════════════════════════
+let aiTimer=0;
+function tickAI(dt) {
+  aiTimer+=dt;
+  if(aiTimer<AI_INTERVAL) return;
+  aiTimer=0;
+  const aiN=nodes.filter(n=>n.owner===OWNER.AI&&n.troops>=4);
+  if(!aiN.length) return;
+  const atk=aiN.reduce((a,b)=>a.troops>b.troops?a:b);
+  const tgts=nodes.filter(n=>n.owner!==OWNER.AI);
+  if(!tgts.length) return;
+  const tgt=tgts.reduce((best,t)=>{
+    const db=Math.hypot(atk.x-best.x,atk.y-best.y);
+    const dt2=Math.hypot(atk.x-t.x,atk.y-t.y);
+    return (t.troops+dt2*0.08)<(best.troops+db*0.08)?t:best;
+  });
+  launchWave(atk,tgt,OWNER.AI);
+}
+
+// ═══ GAME STATE / TIMER ═══════════════════════════════════════════════════════
+let gameState='playing', endResult=null, gameTime=GAME_DURATION;
+
+function tickTimer(dt) {
+  if(gameState!=='playing') return;
+  gameTime-=dt;
+  if(gameTime<=0){gameTime=0;endGame();}
+}
+
+function checkWin() {
+  if(gameState!=='playing') return;
+  const p=nodes.filter(n=>n.owner===OWNER.PLAYER).length;
+  const a=nodes.filter(n=>n.owner===OWNER.AI).length;
+  if(a===0||p===0) endGame();
+}
+
+function endGame() {
+  if(gameState==='ended') return;
+  gameState='ended';
+  const p=nodes.filter(n=>n.owner===OWNER.PLAYER).length;
+  const a=nodes.filter(n=>n.owner===OWNER.AI).length;
+  let pt=0,at=0;
+  nodes.forEach(n=>{if(n.owner===OWNER.PLAYER)pt+=n.troops;if(n.owner===OWNER.AI)at+=n.troops;});
+  if(p>a) endResult='player';
+  else if(a>p) endResult='ai';
+  else if(pt>at) endResult='player';
+  else if(at>pt) endResult='ai';
+  else endResult='draw';
+}
+
+function restart() {
+  gameState='playing'; endResult=null; gameTime=GAME_DURATION;
+  waves=[]; aiTimer=0;
+  initNodes(); layoutNodes();
+}
+
+// ═══ INPUT ════════════════════════════════════════════════════════════════════
+let drag=null;
+
+function inputDown(px,py) {
+  if(gameState==='ended'){restart();return;}
+  const hit=nodeAt(px,py);
+  if(hit&&hit.owner===OWNER.PLAYER&&hit.troops>=2)
+    drag={srcNode:hit,curX:px,curY:py};
+}
+function inputMove(px,py) { if(drag){drag.curX=px;drag.curY=py;} }
+function inputUp(px,py) {
+  if(!drag) return;
+  const dst=nodeAt(px,py);
+  if(dst&&dst!==drag.srcNode) launchWave(drag.srcNode,dst,OWNER.PLAYER);
+  drag=null;
+}
+
+canvas.addEventListener('touchstart',e=>{e.preventDefault();const t=e.changedTouches[0];inputDown(t.clientX,t.clientY);},{passive:false});
+canvas.addEventListener('touchmove', e=>{e.preventDefault();const t=e.changedTouches[0];inputMove(t.clientX,t.clientY);},{passive:false});
+canvas.addEventListener('touchend',  e=>{e.preventDefault();const t=e.changedTouches[0];inputUp(t.clientX,t.clientY);},{passive:false});
+canvas.addEventListener('touchcancel',()=>{drag=null;});
+canvas.addEventListener('mousedown',e=>inputDown(e.clientX,e.clientY));
+canvas.addEventListener('mousemove',e=>inputMove(e.clientX,e.clientY));
+canvas.addEventListener('mouseup',  e=>inputUp(e.clientX,e.clientY));
+
+// ═══ RENDER ═══════════════════════════════════════════════════════════════════
+function ownerFill(owner,lo) {
+  if(owner===OWNER.PLAYER) return lo?C.playerLo:C.player;
+  if(owner===OWNER.AI)     return lo?C.aiLo:C.ai;
+  return lo?C.neutralLo:C.neutral;
+}
+
+function drawEdges() {
+  ctx.save();
+  ctx.strokeStyle=C.edgeLine; ctx.lineWidth=1.5;
+  ctx.setLineDash([4,6]);
+  EDGES.forEach(([a,b])=>{ctx.beginPath();ctx.moveTo(nodes[a].x,nodes[a].y);ctx.lineTo(nodes[b].x,nodes[b].y);ctx.stroke();});
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+
+function drawNode(n) {
+  const r=nodeRadius(n), cx=n.x, cy=n.y;
+  const isPow=n.type==='power';
+  const isSel=drag&&drag.srcNode===n;
+
+  // Halo
+  const ha=isSel?0.30:isPow?0.18:0.10;
+  const hr=r*(isPow?2.1:1.6);
+  const hc=n.owner===OWNER.PLAYER?`rgba(34,153,255,${ha})`:n.owner===OWNER.AI?`rgba(255,85,34,${ha})`:isPow?`rgba(200,68,255,${ha})`:`rgba(80,80,120,${ha*0.7})`;
+  const hg=ctx.createRadialGradient(cx,cy,r*0.4,cx,cy,hr);
+  hg.addColorStop(0,hc); hg.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.beginPath(); ctx.arc(cx,cy,hr,0,Math.PI*2);
+  ctx.fillStyle=hg; ctx.fill();
+
+  // Fill
+  const fg=ctx.createRadialGradient(cx-r*.28,cy-r*.28,0,cx,cy,r);
+  fg.addColorStop(0,ownerFill(n.owner,false)); fg.addColorStop(1,ownerFill(n.owner,true));
+  ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2);
+  ctx.fillStyle=fg; ctx.fill();
+
+  // Border
+  ctx.lineWidth=isPow?2.5:isSel?2.5:1.8;
+  ctx.strokeStyle=isPow?C.power:isSel?(n.owner===OWNER.PLAYER?'#66ccff':'#ff8855'):ownerFill(n.owner,false);
+  ctx.stroke();
+
+  // Power glyph
+  if(isPow){
+    ctx.save(); ctx.globalAlpha=0.50;
+    ctx.font=`${Math.round(r*.72)}px monospace`;
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillStyle=C.power; ctx.fillText('⬡',cx,cy-r*.06);
+    ctx.restore();
+  }
+
+  // Label
+  const lbl=Math.floor(n.troops).toString();
+  const fs=Math.round(r*.58);
+  ctx.font=`bold ${fs}px 'Courier New',monospace`;
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillStyle='rgba(0,0,0,.55)'; ctx.fillText(lbl,cx+1,cy+1);
+  ctx.fillStyle=C.text; ctx.fillText(lbl,cx,cy);
+}
+
+function drawWaves() {
+  waves.forEach(w=>{
+    const pc=w.owner===OWNER.PLAYER?C.playerPtcl:C.aiPtcl;
+    const dx=w.dx-w.sx, dy=w.dy-w.sy;
+    const len=Math.hypot(dx,dy)||1;
+    const px=-dy/len, py=dx/len;
+    for(let i=0;i<PTCL_COUNT;i++){
+      const tOff=(i/PTCL_COUNT)*0.22;
+      const pt=Math.max(0,Math.min(1,w.t-tOff));
+      const fx=w.sx+dx*pt+px*Math.sin(pt*25+i*1.3)*2.8;
+      const fy=w.sy+dy*pt+py*Math.sin(pt*25+i*1.3)*2.8;
+      ctx.beginPath();
+      ctx.arc(fx,fy,Math.max(.8,3.2-i*.3),0,Math.PI*2);
+      ctx.fillStyle=pc+(1-i/PTCL_COUNT)*.92+')';
+      ctx.fill();
+    }
+  });
+}
+
+function drawDragLine() {
+  if(!drag) return;
+  const {srcNode:s,curX,curY}=drag;
+  const pc=s.owner===OWNER.PLAYER?C.playerPtcl:C.aiPtcl;
+  ctx.save();
+  ctx.strokeStyle=pc+'0.55)'; ctx.lineWidth=2;
+  ctx.setLineDash([5,5]);
+  ctx.beginPath(); ctx.moveTo(s.x,s.y); ctx.lineTo(curX,curY); ctx.stroke();
+  ctx.setLineDash([]);
+
+  const sent=Math.floor(s.troops*SEND_FRAC);
+  const mx=(s.x+curX)/2, my=(s.y+curY)/2-10;
+  ctx.font='bold 12px Courier New'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillStyle='rgba(0,0,0,.55)'; ctx.fillText('→'+sent,mx+1,my+1);
+  ctx.fillStyle=pc+'1)'; ctx.fillText('→'+sent,mx,my);
+
+  const ang=Math.atan2(curY-s.y,curX-s.x);
+  const ax=curX-Math.cos(ang)*10, ay=curY-Math.sin(ang)*10;
+  ctx.beginPath();
+  ctx.moveTo(curX,curY);
+  ctx.lineTo(ax+Math.cos(ang+2.4)*8,ay+Math.sin(ang+2.4)*8);
+  ctx.lineTo(ax+Math.cos(ang-2.4)*8,ay+Math.sin(ang-2.4)*8);
+  ctx.closePath(); ctx.fillStyle=pc+'0.7)'; ctx.fill();
+  ctx.restore();
+}
+
+function drawOverlay() {
+  if(gameState!=='ended') return;
+  ctx.fillStyle=C.overlayBg; ctx.fillRect(0,0,W,H);
+  const cx=W/2, cy=H/2;
+  const won=endResult==='player', draw=endResult==='draw';
+  const txt=won?'YOU WIN':draw?'DRAW':'YOU LOSE';
+  const col=won?C.winText:draw?C.drawText:C.loseText;
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.save();
+  ctx.shadowColor=col; ctx.shadowBlur=24;
+  ctx.font=`bold ${Math.round(W*.11)}px 'Courier New',monospace`;
+  ctx.fillStyle=col; ctx.fillText(txt,cx,cy-28);
+  ctx.restore();
+  let pN=0,aN=0;
+  nodes.forEach(n=>{if(n.owner===OWNER.PLAYER)pN++;if(n.owner===OWNER.AI)aN++;});
+  ctx.font=`14px 'Courier New',monospace`; ctx.fillStyle='rgba(200,200,220,.85)';
+  ctx.fillText(`nodes  YOU ${pN}  ·  AI ${aN}`,cx,cy+20);
+  const pulse=.6+.4*Math.sin(Date.now()/400);
+  ctx.font=`12px 'Courier New',monospace`;
+  ctx.fillStyle=`rgba(160,160,200,${pulse})`;
+  ctx.fillText('tap anywhere to restart',cx,cy+56);
+}
+
+// ═══ HUD ══════════════════════════════════════════════════════════════════════
+const hudP=document.getElementById('hud-player');
+const hudT=document.getElementById('hud-timer');
+const hudA=document.getElementById('hud-ai');
+
+function updateHUD() {
+  let pt=0,at=0;
+  nodes.forEach(n=>{
+    if(n.owner===OWNER.PLAYER)pt+=Math.floor(n.troops);
+    if(n.owner===OWNER.AI)at+=Math.floor(n.troops);
+  });
+  hudP.textContent=`YOU ▸ ${pt}`;
+  hudA.textContent=`AI ◂ ${at}`;
+  const s=Math.ceil(gameTime);
+  hudT.textContent=s;
+  hudT.style.color=s<=10?C.timerWarn:'#eee';
+}
+
+// ═══ FPS ══════════════════════════════════════════════════════════════════════
+const fpsEl=document.getElementById('fps-counter');
+let fpsLast=0, fpsCount=0;
+function trackFPS(now) {
+  fpsCount++;
+  if(now-fpsLast>=1000){fpsEl.textContent=fpsCount+' fps';fpsCount=0;fpsLast=now;}
+}
+
+// ═══ LOOP ═════════════════════════════════════════════════════════════════════
+let lastTime=0;
+function loop(now) {
+  const dt=Math.min((now-lastTime)/1000,.1);
+  lastTime=now;
+  if(gameState==='playing'){
+    tickTimer(dt); tickProd(dt); updateWaves(dt); tickAI(dt);
+  }
+  ctx.clearRect(0,0,W,H);
+  drawEdges(); drawWaves();
+  nodes.forEach(drawNode);
+  drawDragLine(); drawOverlay();
+  updateHUD(); trackFPS(now);
+  requestAnimationFrame(loop);
+}
+
+// ═══ BOOT ═════════════════════════════════════════════════════════════════════
+initNodes(); resize();
+requestAnimationFrame(ts=>{lastTime=ts;fpsLast=ts;loop(ts);});
+</script>
+</body>
+</html>
