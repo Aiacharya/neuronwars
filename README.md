@@ -1,5 +1,11 @@
 # Neuron Wars — YouTube Playable Game (MVP)
 
+## Credits
+
+- **Contributor:** Pankaj
+    - **LinkedIn:** https://www.linkedin.com/in/genai-guru-pankaj
+    - **X:** https://x.com/pankajtiw?s=11
+
 ## Goal
 Build a lightweight State.io-style strategy game, deliverable as a single
 self-contained HTML file for YouTube Playables certification. Player vs AI
@@ -111,3 +117,5 @@ Minify, run file-size pass, verify <500KB, FPS test on real Android device.
 | v0.3    | Smart AI  | pending |
 | v0.4    | Powers    | pending |
 | v0.5    | Ship      | pending |
+
+

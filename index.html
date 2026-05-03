@@ -5,73 +5,313 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Neuron Wars</title>
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+  * { margin:0; padding:0; box-sizing:border-box; }
   body {
-    background: #0a0a12;
-    overflow: hidden;
-    width: 100vw; height: 100vh;
-    font-family: 'Courier New', monospace;
-    touch-action: none;
-    user-select: none;
-    -webkit-user-select: none;
+    background:#0a0a12; overflow:hidden;
+    width:100vw; height:100vh;
+    font-family:'Courier New',monospace;
+    touch-action:none; user-select:none; -webkit-user-select:none;
   }
-  #game-canvas { display: block; }
+  #game-canvas { display:block; }
+
+  /* ── HUD ── */
   #hud {
-    position: fixed; top: 0; left: 0; right: 0;
-    display: flex; justify-content: space-between; align-items: center;
-    padding: 8px 16px;
-    background: rgba(10,10,18,0.90);
-    border-bottom: 1px solid #1a1a2e;
-    pointer-events: none; z-index: 10; height: 40px;
+    position:fixed; top:0; left:0; right:0; height:44px;
+    background:rgba(8,8,18,0.93);
+    border-bottom:1px solid #1a1a2e;
+    pointer-events:none; z-index:10;
+    display:flex; flex-direction:column;
+    justify-content:center; padding:0 14px; gap:3px;
   }
-  #hud-player { color: #4af; font-size: 13px; font-weight: bold; }
-  #hud-timer  { color: #eee; font-size: 14px; font-weight: bold; letter-spacing: 1px; }
-  #hud-ai     { color: #f64; font-size: 13px; font-weight: bold; }
+  #hud-labels {
+    display:flex; justify-content:space-between; align-items:center;
+  }
+  #hud-player { color:#2299ff; font-size:11px; font-weight:bold; letter-spacing:.5px; }
+  #hud-timer  { color:#eee;    font-size:13px; font-weight:bold; letter-spacing:1px; }
+  #hud-ai     { color:#ff5522; font-size:11px; font-weight:bold; letter-spacing:.5px; }
+  #hud-bar-wrap {
+    height:5px; border-radius:3px; overflow:hidden;
+    background:#1a1a2a; display:flex;
+  }
+  #bar-player { background:#2299ff; height:100%; transition:width .4s; }
+  #bar-ai     { background:#ff5522; height:100%; transition:width .4s; }
+  #bar-neutral{ background:#3a3a5c; height:100%; transition:width .4s; }
+
   #fps-counter {
-    position: fixed; bottom: 6px; right: 10px;
-    color: #333; font-size: 10px; font-family: monospace;
-    pointer-events: none; z-index: 20;
+    position:fixed; bottom:6px; right:10px;
+    color:#2a2a3a; font-size:10px; font-family:monospace;
+    pointer-events:none; z-index:20;
   }
   #version-tag {
-    position: fixed; bottom: 6px; left: 10px;
-    color: #2a2a3a; font-size: 10px; font-family: monospace;
-    pointer-events: none; z-index: 20;
+    position:fixed; bottom:6px; left:10px;
+    color:#2a2a3a; font-size:10px; font-family:monospace;
+    pointer-events:none; z-index:20;
+  }
+  #map-label {
+    position:fixed; top:50px; left:50%; transform:translateX(-50%);
+    color:rgba(180,180,220,0.35); font-size:9px; letter-spacing:2px;
+    text-transform:uppercase; pointer-events:none; z-index:10;
   }
 </style>
 </head>
 <body>
 <div id="hud">
-  <span id="hud-player">YOU ▸ 0</span>
-  <span id="hud-timer">60</span>
-  <span id="hud-ai">AI ◂ 0</span>
+  <div id="hud-labels">
+    <span id="hud-player">YOU ▸ 0</span>
+    <span id="hud-timer">60</span>
+    <span id="hud-ai">AI ◂ 0</span>
+  </div>
+  <div id="hud-bar-wrap">
+    <div id="bar-player" style="width:25%"></div>
+    <div id="bar-ai"     style="width:25%"></div>
+    <div id="bar-neutral"style="width:50%"></div>
+  </div>
 </div>
 <canvas id="game-canvas"></canvas>
+<!-- Credits: Contributor: Pankaj
+  LinkedIn: https://www.linkedin.com/in/genai-guru-pankaj
+  X: https://x.com/pankajtiw?s=11 -->
 <div id="fps-counter">-- fps</div>
-<div id="version-tag">v0.2 combat</div>
-<script>
-// ═══ CONSTANTS ═══════════════════════════════════════════════════════════════
-const OWNER = { NONE: 0, PLAYER: 1, AI: 2 };
-const C = {
-  bg:'#0a0a12', edgeLine:'#1c1c30',
-  neutral:'#4a4a6c', neutralLo:'#24243a',
-  player:'#2299ff', playerLo:'#0d3366', playerPtcl:'rgba(34,153,255,',
-  ai:'#ff5522',     aiLo:'#661800',     aiPtcl:'rgba(255,85,34,',
-  power:'#cc44ff',  powerLo:'#440d66',
-  text:'#ffffff',   timerWarn:'#ff4433',
-  overlayBg:'rgba(5,5,14,0.88)',
-  winText:'#44ffaa', loseText:'#ff4433', drawText:'#cccc44',
-};
-const WAVE_SPEED    = 130;
-const AI_INTERVAL   = 1.5;
-const SEND_FRAC     = 0.50;
-const GAME_DURATION = 60;
-const HIT_MUL       = 1.6;
-const DOT_INTERVAL  = 0.05; // 50ms stagger between stream dots
+<div id="version-tag">v0.3</div>
+<div id="map-label"></div>
 
-// ═══ CANVAS ═══════════════════════════════════════════════════════════════════
+<script>
+'use strict';
+// ╔══════════════════════════════════════════════════════════════════════════════╗
+// ║  NEURON WARS  ·  v0.3 — State.io-quality polish                            ║
+// ╚══════════════════════════════════════════════════════════════════════════════╝
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// § 1  TUNING CONSTANTS  (all magic numbers live here, nowhere else)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const CFG = {
+  // Physics
+  WAVE_SPEED:       145,   // px/s base travel speed
+  SEND_FRAC:        0.50,  // fraction of troops sent per wave
+  EASE_IN_DIST:     0.12,  // fraction of path for ease-in
+  EASE_OUT_DIST:    0.14,  // fraction of path for ease-out
+  EASE_POWER:       2.2,   // exponent for easing curve
+
+  // Stream particles
+  PARTICLE_SIZE:    4.5,   // diamond half-size px
+  PARTICLE_GAP:     0.040, // spacing between dots as fraction of wave duration
+  MAX_DOTS:         38,    // cap dots per wave for perf
+  LATERAL_JITTER:   3.2,   // ±px sideways scatter per particle
+  JITTER_FREQ:      4.8,   // how tightly the scatter oscillates along path
+
+  // Ghost trail
+  TRAIL_LEN:        5,     // segments behind each particle
+  TRAIL_ALPHA_MAX:  0.38,  // head alpha of trail
+  TRAIL_FADE:       0.55,  // per-segment alpha multiplier
+
+  // Bezier curve
+  CURVE_BEND:       0.22,  // arc height as fraction of distance
+
+  // Waves / clusters
+  WAVE_CLUSTER_SIZE:5,     // emit this many particles per micro-burst
+  WAVE_CLUSTER_GAP: 0.022, // extra gap between clusters (fraction)
+
+  // Node pulse anim  (spring)
+  SPRING_K:         0.28,
+  SPRING_DAMP:      0.58,
+  PULSE_SEND:       0.82,  // scale on send
+  PULSE_RECV:       1.18,  // scale on receive
+  PULSE_HIT:        1.12,  // scale on enemy hit
+
+  // Impact particles
+  IMPACT_COUNT:     8,     // splat dots on arrival
+  IMPACT_LIFE:      0.38,  // seconds
+  IMPACT_SPEED:     52,    // px/s outward
+  IMPACT_SIZE:      3.2,
+
+  // Color wash (capture feedback)
+  WASH_DECAY:       2.8,   // how fast the wash fades per second
+
+  // AI
+  AI_INTERVAL:      1.4,
+  AI_MIN_TROOPS:    5,
+
+  // Game
+  GAME_DURATION:    60,
+  HIT_MUL:          1.6,   // tap radius multiplier
+
+  // Reduced motion (set true to disable decorative FX)
+  REDUCED_MOTION: window.matchMedia('(prefers-reduced-motion:reduce)').matches,
+};
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// § 2  COLOUR PALETTE
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const OWNER = { NONE:0, PLAYER:1, AI:2 };
+const PAL = {
+  bg:          '#0a0a12',
+  edge:        'rgba(30,30,55,0.55)',
+  edgeDrag:    'rgba(100,160,255,0.35)',
+  neutral:     '#4a4a6c',
+  neutralLo:   '#22223a',
+  player:      '#2299ff',
+  playerLo:    '#0a2d5a',
+  playerRgb:   '34,153,255',
+  ai:          '#ff5522',
+  aiLo:        '#5a1800',
+  aiRgb:       '255,85,34',
+  power:       '#cc44ff',
+  powerLo:     '#330966',
+  text:        '#ffffff',
+  timerWarn:   '#ff4433',
+  overlayBg:   'rgba(4,4,12,0.90)',
+  winText:     '#44ffaa',
+  loseText:    '#ff4433',
+  drawText:    '#cccc44',
+};
+
+function ownerColor(owner, lo=false) {
+  if (owner===OWNER.PLAYER) return lo ? PAL.playerLo : PAL.player;
+  if (owner===OWNER.AI)     return lo ? PAL.aiLo     : PAL.ai;
+  return lo ? PAL.neutralLo : PAL.neutral;
+}
+function ownerRgb(owner) {
+  if (owner===OWNER.PLAYER) return PAL.playerRgb;
+  if (owner===OWNER.AI)     return PAL.aiRgb;
+  return '120,120,180';
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// § 3  MAP DEFINITIONS  (data-driven, zero rendering code)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Each map: { name, nodes:[{id,fx,fy,owner,troops,cap,prod,type}], edges:[[a,b],...] }
+// fx/fy are 0-1 fractions of usable canvas area (top-bar and bottom gutter excluded)
+
+const MAPS = [
+// ── 0: Classic (original layout) ─────────────────────────────────────────────
+{
+  name: 'Classic',
+  nodes: [
+    {id:0,fx:.28,fy:.80,owner:OWNER.PLAYER,troops:15,cap:20,prod:1.2,type:'normal'},
+    {id:1,fx:.72,fy:.80,owner:OWNER.PLAYER,troops:15,cap:20,prod:1.2,type:'normal'},
+    {id:2,fx:.28,fy:.20,owner:OWNER.AI,    troops:15,cap:20,prod:1.2,type:'normal'},
+    {id:3,fx:.72,fy:.20,owner:OWNER.AI,    troops:15,cap:20,prod:1.2,type:'normal'},
+    {id:4,fx:.30,fy:.50,owner:OWNER.NONE,  troops:8, cap:25,prod:1.8,type:'power'},
+    {id:5,fx:.70,fy:.50,owner:OWNER.NONE,  troops:8, cap:25,prod:1.8,type:'power'},
+    {id:6,fx:.50,fy:.33,owner:OWNER.NONE,  troops:5, cap:15,prod:0.8,type:'neutral'},
+    {id:7,fx:.50,fy:.67,owner:OWNER.NONE,  troops:5, cap:15,prod:0.8,type:'neutral'},
+  ],
+  edges:[[0,7],[1,7],[2,6],[3,6],[0,4],[1,5],[2,4],[3,5],[4,6],[5,6],[4,7],[5,7],[6,7]],
+},
+
+// ── 1: The Hourglass ─────────────────────────────────────────────────────────
+// Two wide zones connected by one central chokepoint
+{
+  name: 'Hourglass',
+  nodes: [
+    {id:0,fx:.18,fy:.82,owner:OWNER.PLAYER,troops:18,cap:22,prod:1.3,type:'normal'},
+    {id:1,fx:.50,fy:.88,owner:OWNER.PLAYER,troops:12,cap:18,prod:1.0,type:'normal'},
+    {id:2,fx:.82,fy:.82,owner:OWNER.PLAYER,troops:18,cap:22,prod:1.3,type:'normal'},
+    {id:3,fx:.18,fy:.18,owner:OWNER.AI,    troops:18,cap:22,prod:1.3,type:'normal'},
+    {id:4,fx:.50,fy:.12,owner:OWNER.AI,    troops:12,cap:18,prod:1.0,type:'normal'},
+    {id:5,fx:.82,fy:.18,owner:OWNER.AI,    troops:18,cap:22,prod:1.3,type:'normal'},
+    {id:6,fx:.50,fy:.50,owner:OWNER.NONE,  troops:10,cap:30,prod:2.2,type:'power'}, // chokepoint
+    {id:7,fx:.25,fy:.65,owner:OWNER.NONE,  troops:6, cap:14,prod:0.7,type:'neutral'},
+    {id:8,fx:.75,fy:.65,owner:OWNER.NONE,  troops:6, cap:14,prod:0.7,type:'neutral'},
+    {id:9,fx:.25,fy:.35,owner:OWNER.NONE,  troops:6, cap:14,prod:0.7,type:'neutral'},
+    {id:10,fx:.75,fy:.35,owner:OWNER.NONE, troops:6, cap:14,prod:0.7,type:'neutral'},
+  ],
+  edges:[[0,7],[1,7],[1,8],[2,8],[3,9],[4,9],[4,10],[5,10],
+         [7,6],[8,6],[9,6],[10,6],[0,1],[1,2],[3,4],[4,5]],
+},
+
+// ── 2: The Archipelago ───────────────────────────────────────────────────────
+// Small clusters connected by long lanes
+{
+  name: 'Archipelago',
+  nodes: [
+    {id:0,fx:.12,fy:.85,owner:OWNER.PLAYER,troops:20,cap:24,prod:1.4,type:'normal'},
+    {id:1,fx:.22,fy:.70,owner:OWNER.PLAYER,troops:10,cap:16,prod:0.9,type:'normal'},
+    {id:2,fx:.88,fy:.15,owner:OWNER.AI,    troops:20,cap:24,prod:1.4,type:'normal'},
+    {id:3,fx:.78,fy:.30,owner:OWNER.AI,    troops:10,cap:16,prod:0.9,type:'normal'},
+    {id:4,fx:.38,fy:.55,owner:OWNER.NONE,  troops:8, cap:20,prod:1.6,type:'power'},
+    {id:5,fx:.62,fy:.45,owner:OWNER.NONE,  troops:8, cap:20,prod:1.6,type:'power'},
+    {id:6,fx:.20,fy:.40,owner:OWNER.NONE,  troops:5, cap:12,prod:0.6,type:'neutral'},
+    {id:7,fx:.50,fy:.80,owner:OWNER.NONE,  troops:5, cap:12,prod:0.6,type:'neutral'},
+    {id:8,fx:.80,fy:.60,owner:OWNER.NONE,  troops:5, cap:12,prod:0.6,type:'neutral'},
+    {id:9,fx:.50,fy:.20,owner:OWNER.NONE,  troops:5, cap:12,prod:0.6,type:'neutral'},
+  ],
+  edges:[[0,1],[1,6],[6,4],[4,7],[7,5],[5,8],[8,3],[3,2],
+         [1,4],[4,5],[5,3],[6,9],[9,5],[2,9]],
+},
+
+// ── 3: Ring of Fire ──────────────────────────────────────────────────────────
+// Outer ring plus one high-value dangerous center
+{
+  name: 'Ring of Fire',
+  nodes: [
+    {id:0,fx:.50,fy:.12,owner:OWNER.PLAYER,troops:14,cap:20,prod:1.1,type:'normal'},
+    {id:1,fx:.83,fy:.30,owner:OWNER.PLAYER,troops:14,cap:20,prod:1.1,type:'normal'},
+    {id:2,fx:.83,fy:.70,owner:OWNER.NONE,  troops:7, cap:16,prod:0.8,type:'neutral'},
+    {id:3,fx:.50,fy:.88,owner:OWNER.NONE,  troops:7, cap:16,prod:0.8,type:'neutral'},
+    {id:4,fx:.17,fy:.70,owner:OWNER.AI,    troops:14,cap:20,prod:1.1,type:'normal'},
+    {id:5,fx:.17,fy:.30,owner:OWNER.AI,    troops:14,cap:20,prod:1.1,type:'normal'},
+    {id:6,fx:.50,fy:.50,owner:OWNER.NONE,  troops:18,cap:35,prod:2.8,type:'power'}, // center
+  ],
+  edges:[[0,1],[1,2],[2,3],[3,4],[4,5],[5,0],  // ring
+         [0,6],[1,6],[2,6],[3,6],[4,6],[5,6]], // spokes
+},
+
+// ── 4: The Web ───────────────────────────────────────────────────────────────
+// Dense interconnected graph — many attack vectors
+{
+  name: 'The Web',
+  nodes: [
+    {id:0,fx:.50,fy:.10,owner:OWNER.AI,    troops:16,cap:20,prod:1.2,type:'normal'},
+    {id:1,fx:.80,fy:.28,owner:OWNER.NONE,  troops:6, cap:14,prod:0.7,type:'neutral'},
+    {id:2,fx:.88,fy:.60,owner:OWNER.NONE,  troops:6, cap:14,prod:0.7,type:'neutral'},
+    {id:3,fx:.65,fy:.85,owner:OWNER.NONE,  troops:6, cap:14,prod:0.7,type:'neutral'},
+    {id:4,fx:.35,fy:.85,owner:OWNER.NONE,  troops:6, cap:14,prod:0.7,type:'neutral'},
+    {id:5,fx:.12,fy:.60,owner:OWNER.NONE,  troops:6, cap:14,prod:0.7,type:'neutral'},
+    {id:6,fx:.20,fy:.28,owner:OWNER.NONE,  troops:6, cap:14,prod:0.7,type:'neutral'},
+    {id:7,fx:.65,fy:.38,owner:OWNER.NONE,  troops:8, cap:18,prod:1.4,type:'power'},
+    {id:8,fx:.35,fy:.38,owner:OWNER.NONE,  troops:8, cap:18,prod:1.4,type:'power'},
+    {id:9,fx:.65,fy:.62,owner:OWNER.NONE,  troops:6, cap:14,prod:0.8,type:'neutral'},
+    {id:10,fx:.35,fy:.62,owner:OWNER.NONE, troops:6, cap:14,prod:0.8,type:'neutral'},
+    {id:11,fx:.50,fy:.90,owner:OWNER.PLAYER,troops:16,cap:20,prod:1.2,type:'normal'},
+  ],
+  edges:[[0,1],[1,2],[2,3],[3,4],[4,5],[5,6],[6,0],
+         [0,7],[1,7],[6,8],[5,10],[2,9],[3,9],[4,10],
+         [7,8],[7,9],[8,10],[9,11],[10,11],[8,7]],
+},
+
+// ── 5: The Fortress ──────────────────────────────────────────────────────────
+// Asymmetric: AI has one strong citadel, player has many weak nodes
+{
+  name: 'Fortress',
+  nodes: [
+    // Player cluster — many small nodes
+    {id:0,fx:.12,fy:.50,owner:OWNER.PLAYER,troops:12,cap:18,prod:1.0,type:'normal'},
+    {id:1,fx:.22,fy:.25,owner:OWNER.PLAYER,troops:10,cap:16,prod:0.9,type:'normal'},
+    {id:2,fx:.22,fy:.75,owner:OWNER.PLAYER,troops:10,cap:16,prod:0.9,type:'normal'},
+    {id:3,fx:.35,fy:.12,owner:OWNER.PLAYER,troops:8, cap:14,prod:0.8,type:'normal'},
+    {id:4,fx:.35,fy:.88,owner:OWNER.PLAYER,troops:8, cap:14,prod:0.8,type:'normal'},
+    // Neutral buffer zone
+    {id:5,fx:.50,fy:.35,owner:OWNER.NONE,  troops:8, cap:18,prod:1.2,type:'neutral'},
+    {id:6,fx:.50,fy:.65,owner:OWNER.NONE,  troops:8, cap:18,prod:1.2,type:'neutral'},
+    {id:7,fx:.62,fy:.50,owner:OWNER.NONE,  troops:10,cap:22,prod:1.5,type:'power'},
+    // AI Fortress
+    {id:8,fx:.85,fy:.50,owner:OWNER.AI,    troops:40,cap:60,prod:3.5,type:'power'}, // citadel
+    {id:9,fx:.75,fy:.28,owner:OWNER.AI,    troops:12,cap:18,prod:1.0,type:'normal'},
+    {id:10,fx:.75,fy:.72,owner:OWNER.AI,   troops:12,cap:18,prod:1.0,type:'normal'},
+  ],
+  edges:[[0,1],[0,2],[1,3],[2,4],[1,5],[2,6],[3,5],[4,6],
+         [5,7],[6,7],[7,9],[7,10],[9,8],[10,8],[9,10]],
+},
+];
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// § 4  CANVAS SETUP
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 const canvas = document.getElementById('game-canvas');
 const ctx    = canvas.getContext('2d');
-let W = 0, H = 0;
+let W=0, H=0;
+
 function resize() {
   W = canvas.width  = window.innerWidth;
   H = canvas.height = window.innerHeight;
@@ -79,393 +319,620 @@ function resize() {
 }
 window.addEventListener('resize', resize);
 
-// ═══ NODES ════════════════════════════════════════════════════════════════════
-const NODE_DEFS = [
-  {id:0,fx:.28,fy:.80,owner:OWNER.PLAYER,troops:15,cap:20,prod:1.2,type:'normal'},
-  {id:1,fx:.72,fy:.80,owner:OWNER.PLAYER,troops:15,cap:20,prod:1.2,type:'normal'},
-  {id:2,fx:.28,fy:.20,owner:OWNER.AI,    troops:15,cap:20,prod:1.2,type:'normal'},
-  {id:3,fx:.72,fy:.20,owner:OWNER.AI,    troops:15,cap:20,prod:1.2,type:'normal'},
-  {id:4,fx:.30,fy:.50,owner:OWNER.NONE,  troops:8, cap:25,prod:1.8,type:'power'},
-  {id:5,fx:.70,fy:.50,owner:OWNER.NONE,  troops:8, cap:25,prod:1.8,type:'power'},
-  {id:6,fx:.50,fy:.33,owner:OWNER.NONE,  troops:5, cap:15,prod:0.8,type:'neutral'},
-  {id:7,fx:.50,fy:.67,owner:OWNER.NONE,  troops:5, cap:15,prod:0.8,type:'neutral'},
-];
-const EDGES=[[0,7],[1,7],[2,6],[3,6],[0,4],[1,5],[2,4],[3,5],[4,6],[5,6],[4,7],[5,7],[6,7]];
-let nodes = [];
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// § 5  NODE SYSTEM
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+let nodes=[], activeEdges=[], currentMap=0;
 
-function initNodes() {
-  nodes = NODE_DEFS.map(d=>({
-    ...d, x:0, y:0,
-    scaleAnim:{ scale:1, velocity:0, target:1 },
-    captureInfo:{ owner:OWNER.NONE, progress:0 }
+function nodeRadius(n) { return 18 + (n.cap/30)*16; }
+
+function initNodes(mapIdx) {
+  const map = MAPS[mapIdx];
+  activeEdges = map.edges;
+  nodes = map.nodes.map(d => ({
+    ...d,
+    x:0, y:0,
+    // Spring animation
+    spring: { scale:1, vel:0, target:1 },
+    // Color-wash (capture feedback)  wash={alpha, rgb}
+    wash: { alpha:0, rgb:'255,255,255' },
   }));
+  document.getElementById('map-label').textContent = map.name;
 }
 
 function layoutNodes() {
-  const tp=44, bp=26, uh=H-tp-bp;
-  nodes.forEach(n=>{
-    const d=NODE_DEFS[n.id];
-    n.x=d.fx*W; n.y=tp+d.fy*uh;
+  const tp=48, bp=24, uh=H-tp-bp;
+  nodes.forEach(n => {
+    const d = MAPS[currentMap].nodes[n.id];
+    n.x = d.fx * W;
+    n.y = tp + d.fy * uh;
   });
 }
 
-function nodeRadius(n) { return 18+(n.cap/30)*16; }
-
-function nodeAt(px,py) {
+function nodeAt(px, py) {
   let best=null, bd=Infinity;
-  nodes.forEach(n=>{
-    const d=Math.hypot(n.x-px,n.y-py);
-    if(d<bd){bd=d;best=n;}
+  nodes.forEach(n => {
+    const d = Math.hypot(n.x-px, n.y-py);
+    if (d < bd) { bd=d; best=n; }
   });
-  return (best&&bd<nodeRadius(best)*HIT_MUL)?best:null;
+  return (best && bd < nodeRadius(best)*CFG.HIT_MUL) ? best : null;
 }
 
-// ═══ WAVES ════════════════════════════════════════════════════════════════════
-let waves=[], waveId=0;
-
-function launchWave(src,dst,owner) {
-  if(src.id===dst.id||src.owner!==owner) return;
-  const sent=Math.floor(src.troops*SEND_FRAC);
-  if(sent<1) return;
-  src.troops-=sent;
-  const dist=Math.hypot(dst.x-src.x,dst.y-src.y)||1;
-  const totalDots=Math.min(sent,30);
-  waves.push({id:waveId++,owner,srcId:src.id,dstId:dst.id,sent,
-    t:0,duration:dist/WAVE_SPEED,sx:src.x,sy:src.y,dx:dst.x,dy:dst.y,
-    totalDots});
-  // Send juice: compress then spring back
-  src.scaleAnim.scale=0.85; src.scaleAnim.velocity=0; src.scaleAnim.target=1.0;
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// § 6  PATH GENERATION  (Bezier arc + per-particle jitter)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Returns point on quadratic bezier at t ∈ [0,1]
+function bezierPoint(sx, sy, cpx, cpy, ex, ey, t) {
+  const mt = 1-t;
+  return {
+    x: mt*mt*sx + 2*mt*t*cpx + t*t*ex,
+    y: mt*mt*sy + 2*mt*t*cpy + t*t*ey,
+  };
 }
 
+// Compute the bezier control point for a wave (perpendicular arc)
+function makeControlPoint(sx, sy, ex, ey, seed) {
+  const mx=(sx+ex)/2, my=(sy+ey)/2;
+  const dx=ex-sx,   dy=ey-sy;
+  const dist=Math.hypot(dx,dy)||1;
+  // perpendicular normal
+  const nx=-dy/dist, ny=dx/dist;
+  // alternate bend direction based on wave id seed to avoid overlap
+  const dir = (seed%2===0)?1:-1;
+  const bend = dist * CFG.CURVE_BEND * dir;
+  return { cpx: mx+nx*bend, cpy: my+ny*bend };
+}
+
+// Eased t along the path: ease-in at start, ease-out at end
+function easedT(raw) {
+  const ei = CFG.EASE_IN_DIST, eo = CFG.EASE_OUT_DIST, ep = CFG.EASE_POWER;
+  if (raw < ei) {
+    return Math.pow(raw/ei, ep) * ei;
+  } else if (raw > 1-eo) {
+    const u = (raw-(1-eo))/eo;
+    return (1-eo) + (1-Math.pow(1-u, ep)) * eo;
+  }
+  return raw;
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// § 7  WAVE / TROOP SYSTEM
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+let waves=[], waveSeq=0;
+
+function launchWave(src, dst, owner) {
+  if (src.id===dst.id || src.owner!==owner) return;
+  const sent = Math.floor(src.troops * CFG.SEND_FRAC);
+  if (sent < 1) return;
+  src.troops -= sent;
+
+  const dist = Math.hypot(dst.x-src.x, dst.y-src.y) || 1;
+  const duration = dist / CFG.WAVE_SPEED;
+  const { cpx, cpy } = makeControlPoint(src.x, src.y, dst.x, dst.y, waveSeq);
+  const totalDots = Math.min(sent, CFG.MAX_DOTS);
+
+  // Per-particle lateral jitter seeds (fixed so they're stable across frames)
+  const jitterSeeds = [];
+  for (let i=0; i<totalDots; i++) {
+    jitterSeeds.push((Math.random()-0.5)*2); // -1..1
+  }
+
+  waves.push({
+    id:waveSeq++, owner, srcId:src.id, dstId:dst.id, sent,
+    t:0, duration,
+    sx:src.x, sy:src.y, ex:dst.x, ey:dst.y,
+    cpx, cpy,
+    totalDots, jitterSeeds,
+  });
+
+  // Send pulse
+  nodePulse(src, CFG.PULSE_SEND, false);
+}
+
+// § 7a  Wave update
 function updateWaves(dt) {
   const done=[];
-  waves.forEach(w=>{
-    w.t+=dt/w.duration;
-    // Update capture ring for attacking waves
-    const dst=nodes[w.dstId];
-    if(w.owner!==dst.owner){
-      if(dst.captureInfo.owner===OWNER.NONE||dst.captureInfo.owner===w.owner){
-        dst.captureInfo.owner=w.owner;
-        dst.captureInfo.progress=Math.max(dst.captureInfo.progress,Math.min(1,w.t));
-      }
-    }
-    if(w.t>=1)done.push(w);
+  waves.forEach(w => {
+    w.t += dt / w.duration;
+    if (w.t >= 1) done.push(w);
   });
-  done.forEach(w=>{ waves=waves.filter(x=>x!==w); resolveArrival(w); });
+  done.forEach(w => {
+    waves = waves.filter(x=>x!==w);
+    resolveArrival(w);
+  });
 }
 
+// § 7b  Arrival resolution
 function resolveArrival(w) {
-  const dst=nodes[w.dstId];
-  dst.captureInfo={owner:OWNER.NONE,progress:0};
-  if(dst.owner===w.owner) {
-    dst.troops=Math.min(dst.cap, dst.troops+w.sent);
-  } else if(w.sent>dst.troops) {
-    dst.owner=w.owner;
-    dst.troops=w.sent-dst.troops;
+  const dst = nodes[w.dstId];
+
+  if (dst.owner === w.owner) {
+    // Reinforce
+    dst.troops = Math.min(dst.cap, dst.troops + w.sent);
+    nodePulse(dst, CFG.PULSE_RECV, false);
+  } else if (w.sent > dst.troops) {
+    // Capture
+    const prevOwner = dst.owner;
+    dst.owner  = w.owner;
+    dst.troops = w.sent - dst.troops;
+    // Color wash: flash with attacker colour
+    dst.wash.alpha = 0.70;
+    dst.wash.rgb   = ownerRgb(w.owner);
+    nodePulse(dst, CFG.PULSE_RECV, false);
+    spawnImpact(dst.x, dst.y, w.owner, CFG.IMPACT_COUNT * 1.5);
+    checkWin();
   } else {
-    dst.troops-=w.sent;
-    if(dst.troops<=0&&dst.owner!==OWNER.NONE){dst.owner=OWNER.NONE;dst.troops=0;}
+    // Repelled
+    dst.troops -= w.sent;
+    if (dst.troops <= 0 && dst.owner !== OWNER.NONE) {
+      dst.owner = OWNER.NONE; dst.troops = 0;
+    }
+    spawnImpact(dst.x, dst.y, w.owner, CFG.IMPACT_COUNT);
+    nodePulse(dst, CFG.PULSE_HIT, false);
   }
-  // Receive juice: pulse out then spring back
-  dst.scaleAnim.scale=1.15; dst.scaleAnim.velocity=0; dst.scaleAnim.target=1.0;
-  checkWin();
 }
 
-// ═══ PRODUCTION ══════════════════════════════════════════════════════════════
-function tickProd(dt) {
-  nodes.forEach(n=>{
-    if(n.owner===OWNER.NONE) return;
-    n.troops=Math.min(n.cap, n.troops+n.prod*dt);
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// § 8  PARTICLE / TRAIL / IMPACT SYSTEM
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+let impacts=[];
+
+function spawnImpact(x, y, owner, count) {
+  if (CFG.REDUCED_MOTION) return;
+  const n = Math.ceil(count);
+  for (let i=0; i<n; i++) {
+    const ang = (Math.PI*2*i/n) + (Math.random()-.5)*.8;
+    const spd = CFG.IMPACT_SPEED * (.7+Math.random()*.6);
+    impacts.push({ x, y, vx:Math.cos(ang)*spd, vy:Math.sin(ang)*spd,
+                   life:CFG.IMPACT_LIFE, maxLife:CFG.IMPACT_LIFE,
+                   rgb:ownerRgb(owner) });
+  }
+}
+
+function updateImpacts(dt) {
+  impacts = impacts.filter(p => {
+    p.life -= dt; p.x += p.vx*dt; p.y += p.vy*dt;
+    p.vx *= 0.88; p.vy *= 0.88;
+    return p.life > 0;
   });
 }
 
-// ═══ DUMB AI ══════════════════════════════════════════════════════════════════
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// § 9  NODE ANIMATION (spring + color wash)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function nodePulse(n, targetScale, immediate) {
+  n.spring.target = targetScale;
+  if (immediate) { n.spring.scale = targetScale; n.spring.vel = 0; }
+}
+
+function updateNodeAnims(dt) {
+  nodes.forEach(n => {
+    // Spring
+    const sp = n.spring;
+    sp.vel += (sp.target - sp.scale) * CFG.SPRING_K - sp.vel * CFG.SPRING_DAMP;
+    sp.scale += sp.vel;
+    // Snap target back to 1 once overshoot calms
+    if (Math.abs(sp.scale-1)<0.002 && Math.abs(sp.vel)<0.002) {
+      sp.scale=1; sp.vel=0; sp.target=1;
+    }
+
+    // Color wash decay
+    if (n.wash.alpha > 0) {
+      n.wash.alpha = Math.max(0, n.wash.alpha - CFG.WASH_DECAY * dt);
+    }
+  });
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// § 10  PRODUCTION
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function tickProd(dt) {
+  nodes.forEach(n => {
+    if (n.owner===OWNER.NONE) return;
+    n.troops = Math.min(n.cap, n.troops + n.prod*dt);
+  });
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// § 11  AI
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 let aiTimer=0;
 function tickAI(dt) {
-  aiTimer+=dt;
-  if(aiTimer<AI_INTERVAL) return;
-  aiTimer=0;
-  const aiN=nodes.filter(n=>n.owner===OWNER.AI&&n.troops>=4);
-  if(!aiN.length) return;
-  const atk=aiN.reduce((a,b)=>a.troops>b.troops?a:b);
-  const tgts=nodes.filter(n=>n.owner!==OWNER.AI);
-  if(!tgts.length) return;
-  const tgt=tgts.reduce((best,t)=>{
-    const db=Math.hypot(atk.x-best.x,atk.y-best.y);
-    const dt2=Math.hypot(atk.x-t.x,atk.y-t.y);
-    return (t.troops+dt2*0.08)<(best.troops+db*0.08)?t:best;
+  aiTimer += dt;
+  if (aiTimer < CFG.AI_INTERVAL) return;
+  aiTimer = 0;
+  const aiN = nodes.filter(n => n.owner===OWNER.AI && n.troops>=CFG.AI_MIN_TROOPS);
+  if (!aiN.length) return;
+  const atk = aiN.reduce((a,b) => a.troops>b.troops ? a : b);
+  const tgts = nodes.filter(n => n.owner!==OWNER.AI);
+  if (!tgts.length) return;
+  // Score targets: prefer fewer troops + closer distance
+  const tgt = tgts.reduce((best, t) => {
+    const sb = best.troops + Math.hypot(atk.x-best.x,atk.y-best.y)*0.07;
+    const st = t.troops    + Math.hypot(atk.x-t.x,   atk.y-t.y)*0.07;
+    return st < sb ? t : best;
   });
-  launchWave(atk,tgt,OWNER.AI);
+  launchWave(atk, tgt, OWNER.AI);
 }
 
-// ═══ NODE ANIMATIONS ══════════════════════════════════════════════════════════
-function updateAnims() {
-  nodes.forEach(n=>{
-    const a=n.scaleAnim;
-    a.velocity+=(a.target-a.scale)*0.3-a.velocity*0.6;
-    a.scale+=a.velocity;
-  });
-}
-
-// ═══ GAME STATE / TIMER ═══════════════════════════════════════════════════════
-let gameState='playing', endResult=null, gameTime=GAME_DURATION;
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// § 12  GAME STATE / TIMER
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+let gameState='playing', endResult=null, gameTime=CFG.GAME_DURATION;
 
 function tickTimer(dt) {
-  if(gameState!=='playing') return;
-  gameTime-=dt;
-  if(gameTime<=0){gameTime=0;endGame();}
+  if (gameState!=='playing') return;
+  gameTime -= dt;
+  if (gameTime <= 0) { gameTime=0; endGame(); }
 }
 
 function checkWin() {
-  if(gameState!=='playing') return;
-  const p=nodes.filter(n=>n.owner===OWNER.PLAYER).length;
-  const a=nodes.filter(n=>n.owner===OWNER.AI).length;
-  if(a===0||p===0) endGame();
+  if (gameState!=='playing') return;
+  const p = nodes.filter(n=>n.owner===OWNER.PLAYER).length;
+  const a = nodes.filter(n=>n.owner===OWNER.AI).length;
+  if (a===0 || p===0) endGame();
 }
 
 function endGame() {
-  if(gameState==='ended') return;
+  if (gameState==='ended') return;
   gameState='ended';
   const p=nodes.filter(n=>n.owner===OWNER.PLAYER).length;
   const a=nodes.filter(n=>n.owner===OWNER.AI).length;
-  let pt=0,at=0;
-  nodes.forEach(n=>{if(n.owner===OWNER.PLAYER)pt+=n.troops;if(n.owner===OWNER.AI)at+=n.troops;});
-  if(p>a) endResult='player';
-  else if(a>p) endResult='ai';
-  else if(pt>at) endResult='player';
-  else if(at>pt) endResult='ai';
-  else endResult='draw';
+  let pt=0, at=0;
+  nodes.forEach(n=>{
+    if(n.owner===OWNER.PLAYER) pt+=n.troops;
+    if(n.owner===OWNER.AI)     at+=n.troops;
+  });
+  if (p>a)       endResult='player';
+  else if (a>p)  endResult='ai';
+  else if (pt>at)endResult='player';
+  else if (at>pt)endResult='ai';
+  else           endResult='draw';
 }
 
 function restart() {
-  gameState='playing'; endResult=null; gameTime=GAME_DURATION;
-  waves=[]; aiTimer=0;
-  initNodes(); layoutNodes();
+  currentMap = (currentMap+1) % MAPS.length;
+  gameState='playing'; endResult=null; gameTime=CFG.GAME_DURATION;
+  waves=[]; impacts=[]; aiTimer=0;
+  initNodes(currentMap); layoutNodes();
 }
 
-// ═══ INPUT ════════════════════════════════════════════════════════════════════
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// § 13  INPUT
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 let drag=null;
 
-function inputDown(px,py) {
-  if(gameState==='ended'){restart();return;}
-  const hit=nodeAt(px,py);
-  if(hit){
-    // Tap feedback on any node
-    hit.scaleAnim.scale=1.1; hit.scaleAnim.velocity=0; hit.scaleAnim.target=1.0;
-    if(hit.owner===OWNER.PLAYER&&hit.troops>=2)
-      drag={srcNode:hit,curX:px,curY:py};
+function inputDown(px, py) {
+  if (gameState==='ended') { restart(); return; }
+  const hit = nodeAt(px, py);
+  if (hit) {
+    nodePulse(hit, 1.10, false);
+    if (hit.owner===OWNER.PLAYER && hit.troops>=2)
+      drag = { srcNode:hit, curX:px, curY:py };
   }
 }
-function inputMove(px,py) { if(drag){drag.curX=px;drag.curY=py;} }
-function inputUp(px,py) {
-  if(!drag) return;
-  const dst=nodeAt(px,py);
-  if(dst&&dst!==drag.srcNode){
-    launchWave(drag.srcNode,dst,OWNER.PLAYER);
-    // Tap feedback on target confirmation
-    dst.scaleAnim.scale=1.1; dst.scaleAnim.velocity=0; dst.scaleAnim.target=1.0;
+function inputMove(px, py) { if (drag) { drag.curX=px; drag.curY=py; } }
+function inputUp(px, py) {
+  if (!drag) return;
+  const dst = nodeAt(px, py);
+  if (dst && dst!==drag.srcNode) {
+    launchWave(drag.srcNode, dst, OWNER.PLAYER);
+    nodePulse(dst, 1.08, false);
   }
   drag=null;
 }
 
-canvas.addEventListener('touchstart',e=>{e.preventDefault();const t=e.changedTouches[0];inputDown(t.clientX,t.clientY);},{passive:false});
-canvas.addEventListener('touchmove', e=>{e.preventDefault();const t=e.changedTouches[0];inputMove(t.clientX,t.clientY);},{passive:false});
-canvas.addEventListener('touchend',  e=>{e.preventDefault();const t=e.changedTouches[0];inputUp(t.clientX,t.clientY);},{passive:false});
+canvas.addEventListener('touchstart', e=>{e.preventDefault();const t=e.changedTouches[0];inputDown(t.clientX,t.clientY);},{passive:false});
+canvas.addEventListener('touchmove',  e=>{e.preventDefault();const t=e.changedTouches[0];inputMove(t.clientX,t.clientY);},{passive:false});
+canvas.addEventListener('touchend',   e=>{e.preventDefault();const t=e.changedTouches[0];inputUp(t.clientX,t.clientY);},{passive:false});
 canvas.addEventListener('touchcancel',()=>{drag=null;});
-canvas.addEventListener('mousedown',e=>inputDown(e.clientX,e.clientY));
-canvas.addEventListener('mousemove',e=>inputMove(e.clientX,e.clientY));
-canvas.addEventListener('mouseup',  e=>inputUp(e.clientX,e.clientY));
+canvas.addEventListener('mousedown', e=>inputDown(e.clientX,e.clientY));
+canvas.addEventListener('mousemove', e=>inputMove(e.clientX,e.clientY));
+canvas.addEventListener('mouseup',   e=>inputUp(e.clientX,e.clientY));
 
-// ═══ RENDER ═══════════════════════════════════════════════════════════════════
-function ownerFill(owner,lo) {
-  if(owner===OWNER.PLAYER) return lo?C.playerLo:C.player;
-  if(owner===OWNER.AI)     return lo?C.aiLo:C.ai;
-  return lo?C.neutralLo:C.neutral;
-}
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// § 14  RENDER SUBSYSTEMS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+// § 14a  Edges
 function drawEdges() {
   ctx.save();
-  ctx.strokeStyle=C.edgeLine; ctx.lineWidth=1.5;
-  ctx.setLineDash([4,6]);
-  EDGES.forEach(([a,b])=>{ctx.beginPath();ctx.moveTo(nodes[a].x,nodes[a].y);ctx.lineTo(nodes[b].x,nodes[b].y);ctx.stroke();});
-  ctx.setLineDash([]);
-  ctx.restore();
+  // Only show edges faintly; highlight edges connected to drag source
+  activeEdges.forEach(([a,b]) => {
+    const na=nodes[a], nb=nodes[b];
+    const isDragEdge = drag && (drag.srcNode.id===a||drag.srcNode.id===b);
+    ctx.strokeStyle = isDragEdge ? PAL.edgeDrag : PAL.edge;
+    ctx.lineWidth   = isDragEdge ? 1.8 : 1.0;
+    ctx.globalAlpha = isDragEdge ? 0.7 : 0.4;
+    ctx.setLineDash(isDragEdge ? [] : [3,7]);
+    ctx.beginPath(); ctx.moveTo(na.x,na.y); ctx.lineTo(nb.x,nb.y); ctx.stroke();
+  });
+  ctx.setLineDash([]); ctx.globalAlpha=1; ctx.restore();
 }
 
+// § 14b  Wave particles (diamond shape + ghost trail)
+function drawWaves() {
+  waves.forEach(w => {
+    const rgb = ownerRgb(w.owner);
+    const spacing = CFG.PARTICLE_GAP;          // gap between consecutive dots in t-space
+    const clusterSize = CFG.WAVE_CLUSTER_SIZE;
+    const clusterGap  = CFG.WAVE_CLUSTER_GAP;
+
+    for (let i=0; i<w.totalDots; i++) {
+      // Cluster grouping: add extra gap every clusterSize particles
+      const clusterOffset = Math.floor(i/clusterSize) * clusterGap;
+      const dotT = w.t - i*spacing - clusterOffset;
+      if (dotT <= 0) break;    // not launched yet
+      if (dotT >= 1) continue; // already arrived
+
+      const et = easedT(Math.min(1, Math.max(0, dotT)));
+
+      // Bezier position
+      const bp = bezierPoint(w.sx,w.sy,w.cpx,w.cpy,w.ex,w.ey,et);
+
+      // Lateral jitter: stable per-particle, oscillates along path
+      const jitter = w.jitterSeeds[i] * CFG.LATERAL_JITTER *
+                     Math.sin(dotT * CFG.JITTER_FREQ * Math.PI);
+      // Perpendicular to travel direction (approx from bezier tangent)
+      const et2 = easedT(Math.min(1,Math.max(0,dotT+0.01)));
+      const bp2 = bezierPoint(w.sx,w.sy,w.cpx,w.cpy,w.ex,w.ey,et2);
+      const tdx=bp2.x-bp.x, tdy=bp2.y-bp.y, tlen=Math.hypot(tdx,tdy)||1;
+      const px2 = bp.x + (-tdy/tlen)*jitter;
+      const py2 = bp.y + ( tdx/tlen)*jitter;
+
+      // Ghost trail
+      if (!CFG.REDUCED_MOTION && i===0) { // only trail head particle
+        for (let tr=1; tr<=CFG.TRAIL_LEN; tr++) {
+          const trT = easedT(Math.max(0, dotT - tr*0.018));
+          const tbp = bezierPoint(w.sx,w.sy,w.cpx,w.cpy,w.ex,w.ey,trT);
+          const ta  = CFG.TRAIL_ALPHA_MAX * Math.pow(CFG.TRAIL_FADE, tr);
+          ctx.globalAlpha = ta;
+          ctx.fillStyle   = `rgb(${rgb})`;
+          const ts = CFG.PARTICLE_SIZE * (1 - tr*0.14);
+          drawDiamond(tbp.x, tbp.y, ts);
+        }
+        ctx.globalAlpha=1;
+      }
+
+      // Main diamond
+      const alpha = 0.85 + 0.15 * (1 - dotT); // slightly brighter near source
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle   = `rgb(${rgb})`;
+      drawDiamond(px2, py2, CFG.PARTICLE_SIZE);
+    }
+    ctx.globalAlpha=1;
+  });
+}
+
+function drawDiamond(x, y, s) {
+  ctx.beginPath();
+  ctx.moveTo(x,   y-s);
+  ctx.lineTo(x+s, y  );
+  ctx.lineTo(x,   y+s);
+  ctx.lineTo(x-s, y  );
+  ctx.closePath();
+  ctx.fill();
+}
+
+// § 14c  Impact splats
+function drawImpacts() {
+  if (CFG.REDUCED_MOTION) return;
+  impacts.forEach(p => {
+    const frac = p.life/p.maxLife;
+    ctx.globalAlpha = frac * 0.85;
+    ctx.fillStyle   = `rgb(${p.rgb})`;
+    const s = CFG.IMPACT_SIZE * (0.5 + frac*0.5);
+    drawDiamond(p.x, p.y, s);
+  });
+  ctx.globalAlpha=1;
+}
+
+// § 14d  Node rendering
 function drawNode(n) {
-  const r=nodeRadius(n), cx=n.x, cy=n.y;
-  const isPow=n.type==='power';
-  const isSel=drag&&drag.srcNode===n;
-  const sc=n.scaleAnim.scale;
+  const r  = nodeRadius(n);
+  const cx = n.x, cy = n.y;
+  const isPow = n.type==='power';
+  const isSel = drag && drag.srcNode===n;
+  const sc    = n.spring.scale;
 
   ctx.save();
   ctx.translate(cx,cy); ctx.scale(sc,sc); ctx.translate(-cx,-cy);
 
-  // Halo
-  const ha=isSel?0.30:isPow?0.18:0.10;
-  const hr=r*(isPow?2.1:1.6);
-  const hc=n.owner===OWNER.PLAYER?`rgba(34,153,255,${ha})`:n.owner===OWNER.AI?`rgba(255,85,34,${ha})`:isPow?`rgba(200,68,255,${ha})`:`rgba(80,80,120,${ha*0.7})`;
-  const hg=ctx.createRadialGradient(cx,cy,r*0.4,cx,cy,hr);
-  hg.addColorStop(0,hc); hg.addColorStop(1,'rgba(0,0,0,0)');
+  // Halo glow
+  const ha = isSel?0.32 : isPow?0.20 : 0.11;
+  const hr = r*(isPow?2.2:1.7);
+  const hrgb = n.owner===OWNER.PLAYER ? PAL.playerRgb
+             : n.owner===OWNER.AI     ? PAL.aiRgb
+             : isPow                  ? '200,68,255'
+             : '80,80,120';
+  const hg = ctx.createRadialGradient(cx,cy,r*.3,cx,cy,hr);
+  hg.addColorStop(0, `rgba(${hrgb},${ha})`);
+  hg.addColorStop(1, 'rgba(0,0,0,0)');
   ctx.beginPath(); ctx.arc(cx,cy,hr,0,Math.PI*2);
   ctx.fillStyle=hg; ctx.fill();
 
-  // Fill
-  const fg=ctx.createRadialGradient(cx-r*.28,cy-r*.28,0,cx,cy,r);
-  fg.addColorStop(0,ownerFill(n.owner,false)); fg.addColorStop(1,ownerFill(n.owner,true));
+  // Base fill
+  const fg = ctx.createRadialGradient(cx-r*.3,cy-r*.3,0,cx,cy,r);
+  fg.addColorStop(0, ownerColor(n.owner,false));
+  fg.addColorStop(1, ownerColor(n.owner,true));
   ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2);
   ctx.fillStyle=fg; ctx.fill();
 
-  // Border
-  ctx.lineWidth=isPow?2.5:isSel?2.5:1.8;
-  ctx.strokeStyle=isPow?C.power:isSel?(n.owner===OWNER.PLAYER?'#66ccff':'#ff8855'):ownerFill(n.owner,false);
-  ctx.stroke();
+  // Color-wash overlay on capture
+  if (n.wash.alpha > 0) {
+    ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2);
+    ctx.fillStyle=`rgba(${n.wash.rgb},${n.wash.alpha*0.55})`;
+    ctx.fill();
+  }
 
-  // Power glyph
-  if(isPow){
-    ctx.save(); ctx.globalAlpha=0.50;
-    ctx.font=`${Math.round(r*.72)}px monospace`;
+  // Border
+  const bw = isPow?2.8 : isSel?2.8 : 1.8;
+  const bc = isPow ? PAL.power
+           : isSel ? (n.owner===OWNER.PLAYER?'#66ccff':'#ff8855')
+           : ownerColor(n.owner,false);
+  ctx.lineWidth=bw; ctx.strokeStyle=bc; ctx.stroke();
+
+  // Selected ring pulse
+  if (isSel) {
+    ctx.lineWidth=1.5; ctx.strokeStyle=`rgba(${PAL.playerRgb},0.4)`;
+    ctx.beginPath(); ctx.arc(cx,cy,r*1.35,0,Math.PI*2); ctx.stroke();
+  }
+
+  // Power node glyph
+  if (isPow) {
+    ctx.save(); ctx.globalAlpha=0.55;
+    ctx.font=`${Math.round(r*.70)}px monospace`;
     ctx.textAlign='center'; ctx.textBaseline='middle';
-    ctx.fillStyle=C.power; ctx.fillText('⬡',cx,cy-r*.06);
+    ctx.fillStyle=PAL.power; ctx.fillText('⬡',cx,cy-r*.05);
     ctx.restore();
   }
 
-  // Label
-  const lbl=Math.floor(n.troops).toString();
-  const fs=Math.round(r*.58);
+  // Troop count — large and dominant (State.io style)
+  const lbl = Math.floor(n.troops).toString();
+  const fs  = Math.round(r * .68);
   ctx.font=`bold ${fs}px 'Courier New',monospace`;
   ctx.textAlign='center'; ctx.textBaseline='middle';
-  ctx.fillStyle='rgba(0,0,0,.55)'; ctx.fillText(lbl,cx+1,cy+1);
-  ctx.fillStyle=C.text; ctx.fillText(lbl,cx,cy);
+  // Shadow
+  ctx.fillStyle='rgba(0,0,0,.6)'; ctx.fillText(lbl,cx+1,cy+1.5);
+  // Main text
+  ctx.fillStyle=PAL.text; ctx.fillText(lbl,cx,cy);
 
   ctx.restore();
-
-  // Capture progress ring (outside scale transform — fixed position)
-  const ci=n.captureInfo;
-  if(ci.owner!==OWNER.NONE&&ci.progress>0){
-    const capCol=ci.owner===OWNER.PLAYER?C.player:C.ai;
-    ctx.save();
-    ctx.globalAlpha=0.40;
-    ctx.strokeStyle=capCol; ctx.lineWidth=3.5; ctx.lineCap='round';
-    ctx.beginPath();
-    ctx.arc(cx,cy,r*1.2,-Math.PI/2,-Math.PI/2+Math.PI*2*Math.min(1,ci.progress),false);
-    ctx.stroke();
-    ctx.restore();
-  }
 }
 
-function drawWaves() {
-  waves.forEach(w=>{
-    const col=w.owner===OWNER.PLAYER?C.player:C.ai;
-    const dx=w.dx-w.sx, dy=w.dy-w.sy;
-    const spacing=DOT_INTERVAL/w.duration; // per-dot gap as fraction of [0,1]
-    for(let i=0;i<w.totalDots;i++){
-      const dotT=w.t-i*spacing;
-      if(dotT<=0) break;   // not yet spawned (and all further dots also not)
-      if(dotT>=1) continue; // already at destination
-      ctx.beginPath();
-      ctx.arc(w.sx+dx*dotT, w.sy+dy*dotT, 4, 0, Math.PI*2);
-      ctx.fillStyle=col;
-      ctx.fill();
-    }
-  });
-}
-
+// § 14e  Drag arrow
 function drawDragLine() {
-  if(!drag) return;
-  const {srcNode:s,curX,curY}=drag;
-  const pc=s.owner===OWNER.PLAYER?C.playerPtcl:C.aiPtcl;
+  if (!drag) return;
+  const { srcNode:s, curX, curY } = drag;
+  const rgb = PAL.playerRgb;
+
   ctx.save();
-  ctx.strokeStyle=pc+'0.55)'; ctx.lineWidth=2;
-  ctx.setLineDash([5,5]);
+  ctx.strokeStyle=`rgba(${rgb},0.60)`; ctx.lineWidth=2;
   ctx.beginPath(); ctx.moveTo(s.x,s.y); ctx.lineTo(curX,curY); ctx.stroke();
-  ctx.setLineDash([]);
 
-  const sent=Math.floor(s.troops*SEND_FRAC);
-  const mx=(s.x+curX)/2, my=(s.y+curY)/2-10;
+  // Send count badge
+  const sent = Math.floor(s.troops*CFG.SEND_FRAC);
+  const mx=(s.x+curX)/2, my=(s.y+curY)/2-12;
   ctx.font='bold 12px Courier New'; ctx.textAlign='center'; ctx.textBaseline='middle';
-  ctx.fillStyle='rgba(0,0,0,.55)'; ctx.fillText('→'+sent,mx+1,my+1);
-  ctx.fillStyle=pc+'1)'; ctx.fillText('→'+sent,mx,my);
+  ctx.fillStyle='rgba(0,0,0,.6)'; ctx.fillText('⟶'+sent, mx+1, my+1);
+  ctx.fillStyle=`rgba(${rgb},1)`;  ctx.fillText('⟶'+sent, mx, my);
 
-  const ang=Math.atan2(curY-s.y,curX-s.x);
-  const ax=curX-Math.cos(ang)*10, ay=curY-Math.sin(ang)*10;
+  // Arrowhead
+  const ang = Math.atan2(curY-s.y, curX-s.x);
   ctx.beginPath();
-  ctx.moveTo(curX,curY);
-  ctx.lineTo(ax+Math.cos(ang+2.4)*8,ay+Math.sin(ang+2.4)*8);
-  ctx.lineTo(ax+Math.cos(ang-2.4)*8,ay+Math.sin(ang-2.4)*8);
-  ctx.closePath(); ctx.fillStyle=pc+'0.7)'; ctx.fill();
+  ctx.moveTo(curX, curY);
+  ctx.lineTo(curX-Math.cos(ang-0.4)*14, curY-Math.sin(ang-0.4)*14);
+  ctx.lineTo(curX-Math.cos(ang+0.4)*14, curY-Math.sin(ang+0.4)*14);
+  ctx.closePath();
+  ctx.fillStyle=`rgba(${rgb},0.75)`; ctx.fill();
   ctx.restore();
 }
 
+// § 14f  End screen
 function drawOverlay() {
-  if(gameState!=='ended') return;
-  ctx.fillStyle=C.overlayBg; ctx.fillRect(0,0,W,H);
+  if (gameState!=='ended') return;
+  ctx.fillStyle=PAL.overlayBg; ctx.fillRect(0,0,W,H);
   const cx=W/2, cy=H/2;
   const won=endResult==='player', draw=endResult==='draw';
   const txt=won?'YOU WIN':draw?'DRAW':'YOU LOSE';
-  const col=won?C.winText:draw?C.drawText:C.loseText;
+  const col=won?PAL.winText:draw?PAL.drawText:PAL.loseText;
   ctx.textAlign='center'; ctx.textBaseline='middle';
   ctx.save();
-  ctx.shadowColor=col; ctx.shadowBlur=24;
-  ctx.font=`bold ${Math.round(W*.11)}px 'Courier New',monospace`;
-  ctx.fillStyle=col; ctx.fillText(txt,cx,cy-28);
+  ctx.shadowColor=col; ctx.shadowBlur=30;
+  ctx.font=`bold ${Math.round(W*.10)}px 'Courier New',monospace`;
+  ctx.fillStyle=col; ctx.fillText(txt,cx,cy-30);
   ctx.restore();
+
   let pN=0,aN=0;
   nodes.forEach(n=>{if(n.owner===OWNER.PLAYER)pN++;if(n.owner===OWNER.AI)aN++;});
-  ctx.font=`14px 'Courier New',monospace`; ctx.fillStyle='rgba(200,200,220,.85)';
-  ctx.fillText(`nodes  YOU ${pN}  ·  AI ${aN}`,cx,cy+20);
-  const pulse=.6+.4*Math.sin(Date.now()/400);
+  ctx.font=`14px 'Courier New',monospace`; ctx.fillStyle='rgba(200,200,220,.80)';
+  ctx.fillText(`nodes  YOU ${pN}  ·  AI ${aN}`,cx,cy+22);
+
+  const nextMap = MAPS[(currentMap+1)%MAPS.length].name;
+  ctx.font=`11px 'Courier New',monospace`; ctx.fillStyle='rgba(140,140,180,.70)';
+  ctx.fillText(`next map: ${nextMap}`,cx,cy+46);
+
+  const pulse = .55+.45*Math.sin(Date.now()/420);
   ctx.font=`12px 'Courier New',monospace`;
   ctx.fillStyle=`rgba(160,160,200,${pulse})`;
-  ctx.fillText('tap anywhere to restart',cx,cy+56);
+  ctx.fillText('tap anywhere to continue',cx,cy+70);
 }
 
-// ═══ HUD ══════════════════════════════════════════════════════════════════════
-const hudP=document.getElementById('hud-player');
-const hudT=document.getElementById('hud-timer');
-const hudA=document.getElementById('hud-ai');
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// § 15  HUD UPDATE
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const hudP   = document.getElementById('hud-player');
+const hudT   = document.getElementById('hud-timer');
+const hudA   = document.getElementById('hud-ai');
+const barP   = document.getElementById('bar-player');
+const barA   = document.getElementById('bar-ai');
+const barN   = document.getElementById('bar-neutral');
 
 function updateHUD() {
-  let pt=0,at=0;
+  let pt=0, at=0, pn=0, an=0, nn=0;
   nodes.forEach(n=>{
-    if(n.owner===OWNER.PLAYER)pt+=Math.floor(n.troops);
-    if(n.owner===OWNER.AI)at+=Math.floor(n.troops);
+    if(n.owner===OWNER.PLAYER){pt+=Math.floor(n.troops);pn++;}
+    else if(n.owner===OWNER.AI){at+=Math.floor(n.troops);an++;}
+    else nn++;
   });
   hudP.textContent=`YOU ▸ ${pt}`;
   hudA.textContent=`AI ◂ ${at}`;
   const s=Math.ceil(gameTime);
   hudT.textContent=s;
-  hudT.style.color=s<=10?C.timerWarn:'#eee';
+  hudT.style.color=s<=10?PAL.timerWarn:'#eee';
+
+  // Proportion bar
+  const total=nodes.length;
+  barP.style.width=`${(pn/total*100).toFixed(1)}%`;
+  barA.style.width=`${(an/total*100).toFixed(1)}%`;
+  barN.style.width=`${(nn/total*100).toFixed(1)}%`;
 }
 
-// ═══ FPS ══════════════════════════════════════════════════════════════════════
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// § 16  FPS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 const fpsEl=document.getElementById('fps-counter');
 let fpsLast=0, fpsCount=0;
 function trackFPS(now) {
   fpsCount++;
-  if(now-fpsLast>=1000){fpsEl.textContent=fpsCount+' fps';fpsCount=0;fpsLast=now;}
+  if (now-fpsLast>=1000) { fpsEl.textContent=fpsCount+' fps'; fpsCount=0; fpsLast=now; }
 }
 
-// ═══ LOOP ═════════════════════════════════════════════════════════════════════
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// § 17  MAIN LOOP
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 let lastTime=0;
 function loop(now) {
-  const dt=Math.min((now-lastTime)/1000,.1);
-  lastTime=now;
-  if(gameState==='playing'){
-    tickTimer(dt); tickProd(dt); updateWaves(dt); tickAI(dt);
+  const dt = Math.min((now-lastTime)/1000, .1);
+  lastTime = now;
+
+  if (gameState==='playing') {
+    tickTimer(dt);
+    tickProd(dt);
+    updateWaves(dt);
+    updateImpacts(dt);
+    tickAI(dt);
   }
-  updateAnims();
+  updateNodeAnims(dt);
+
   ctx.clearRect(0,0,W,H);
-  drawEdges(); drawWaves();
+  drawEdges();
+  drawImpacts();
+  drawWaves();
   nodes.forEach(drawNode);
-  drawDragLine(); drawOverlay();
-  updateHUD(); trackFPS(now);
+  drawDragLine();
+  drawOverlay();
+  updateHUD();
+  trackFPS(now);
   requestAnimationFrame(loop);
 }
 
-// ═══ BOOT ═════════════════════════════════════════════════════════════════════
-initNodes(); resize();
-requestAnimationFrame(ts=>{lastTime=ts;fpsLast=ts;loop(ts);});
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// § 18  BOOT
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+initNodes(currentMap);
+resize();
+requestAnimationFrame(ts => { lastTime=ts; fpsLast=ts; loop(ts); });
 </script>
 </body>
 </html>
